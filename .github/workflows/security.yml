@@ -174,12 +174,13 @@ jobs:
           GITLEAKS_VERSION: "8.30.0"
         run: |
           set -euo pipefail
-          curl -fsSLo gitleaks.tar.gz \
-            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSLo "${archive}" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}"
           curl -fsSLo gitleaks_checksums.txt \
             "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
-          grep " gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz$" gitleaks_checksums.txt | sha256sum --check --
-          tar -xzf gitleaks.tar.gz gitleaks
+          grep " ${archive}$" gitleaks_checksums.txt | sha256sum --check --
+          tar -xzf "${archive}" gitleaks
           sudo install gitleaks /usr/local/bin/gitleaks
 
       - name: Gitleaks Scan
