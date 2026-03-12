@@ -249,12 +249,14 @@ jobs:
           VERSION="${{ needs.check.outputs.next_version }}"
           RELEASE_SHA="$(git rev-parse HEAD)"
 
-          # Trigger the dedicated release pipeline on the immutable tag ref so
-          # artifact builds, SBOMs, and crates.io publish use the same source as
-          # the released version.
+          # Trigger the dedicated release pipeline from main's workflow
+          # definition while explicitly checking out the immutable release tag as
+          # the build source. This avoids tag-ref workflow drift and keeps
+          # release artifacts tied to the tagged commit.
           gh workflow run release.yml \
-            --ref "v${VERSION}" \
+            --ref main \
             -f version="${VERSION}" \
+            -f source_ref="v${VERSION}" \
             -f prerelease=false
 
           sleep 5
