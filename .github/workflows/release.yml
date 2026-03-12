@@ -1,6 +1,6 @@
 # ThreatFlux Release Workflow
 # Automated release with multi-platform builds
-# Version: 1.1.1
+# Version: 1.1.2
 
 name: Release
 
@@ -256,25 +256,27 @@ jobs:
 
       - name: Check crates.io token
         id: check_token
+        env:
+          CARGO_PUBLISH_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}
         run: |
-          if [ -n "${{ secrets.CARGO_REGISTRY_TOKEN }}" ]; then
+          if [ -n "${CARGO_PUBLISH_TOKEN}" ]; then
             echo "has_token=true" >> $GITHUB_OUTPUT
           else
             echo "has_token=false" >> $GITHUB_OUTPUT
-            echo "Skipping crates.io publish - token not configured"
+            echo "Skipping crates.io publish - CARGO_REGISTRY_TOKEN / CRATES_IO_TOKEN not configured"
           fi
 
       - name: Verify SDK publish
         if: steps.check_token.outputs.has_token == 'true'
         run: cargo publish -p ${{ env.SDK_PACKAGE }} --locked --dry-run
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}
 
       - name: Publish SDK to crates.io
         if: steps.check_token.outputs.has_token == 'true'
         run: cargo publish -p ${{ env.SDK_PACKAGE }} --locked
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}
 
       - name: Wait for SDK version on crates.io
         if: steps.check_token.outputs.has_token == 'true'
@@ -320,14 +322,14 @@ jobs:
         if: steps.check_token.outputs.has_token == 'true'
         run: cargo publish -p ${{ env.CLI_PACKAGE }} --locked --dry-run
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}
 
       - name: Publish CLI to crates.io
         if: steps.check_token.outputs.has_token == 'true'
         run: |
           cargo publish -p ${{ env.CLI_PACKAGE }} --locked
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}
 
   # ==========================================================================
   # Release Success Gate
