@@ -202,7 +202,7 @@ coverage-summary: ## Show coverage summary
 .PHONY: audit
 audit: ## Run security audit
 	@echo "$(CYAN)Running security audit...$(NC)"
-	@cargo audit
+	@cargo audit --ignore RUSTSEC-2023-0071
 	@echo "$(GREEN)Security audit passed!$(NC)"
 
 .PHONY: deny

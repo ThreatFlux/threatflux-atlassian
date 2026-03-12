@@ -556,6 +556,9 @@ fn write_new_file(path: &PathBuf, contents: &str, restrict_permissions: bool) ->
         bail!("refusing to overwrite existing file {}", path.display());
     }
 
+    #[cfg(not(unix))]
+    let _ = restrict_permissions;
+
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
 
