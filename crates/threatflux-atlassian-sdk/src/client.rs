@@ -474,10 +474,20 @@ impl AtlassianClient {
         let mut fields = HashMap::new();
         fields.insert(
             story_points_field_id.to_string(),
-            serde_json::Value::Number(serde_json::Number::from_f64(story_points).unwrap()),
+            Self::story_points_json_value(story_points)?,
         );
 
         self.update_issue(issue_key, fields).await
+    }
+
+    fn story_points_json_value(story_points: f64) -> Result<Value> {
+        let number = serde_json::Number::from_f64(story_points).ok_or_else(|| {
+            AtlassianError::validation(format!(
+                "Story points must be a finite number, got {story_points}"
+            ))
+        })?;
+
+        Ok(Value::Number(number))
     }
 
     /// Update issue with custom field value (like improvement area from Python examples)
@@ -779,5 +789,21 @@ mod tests {
 
         assert_eq!(config.timeout, Duration::from_secs(30));
         assert!(!config.verify_ssl);
+    }
+
+    #[test]
+    fn test_story_points_reject_non_finite_values() {
+        for story_points in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let err = AtlassianClient::story_points_json_value(story_points).unwrap_err();
+
+            assert!(matches!(err, AtlassianError::Validation { .. }));
+        }
+    }
+
+    #[test]
+    fn test_story_points_accept_finite_values() {
+        let value = AtlassianClient::story_points_json_value(5.0).unwrap();
+
+        assert_eq!(value.as_f64(), Some(5.0));
     }
 }
