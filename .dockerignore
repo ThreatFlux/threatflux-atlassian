@@ -1,0 +1,6 @@
+.git
+.github
+target
+**/target
+*.log
+lcov.info

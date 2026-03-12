@@ -6,14 +6,14 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, dev]
     paths-ignore:
       - "**.md"
       - "LICENSE"
       - ".gitignore"
       - "docs/**"
   pull_request:
-    branches: [main, develop]
+    branches: [main, dev]
     paths-ignore:
       - "**.md"
       - "LICENSE"
@@ -30,6 +30,7 @@ env:
   CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
   RUSTUP_MAX_RETRIES: 10
+  RUST_STABLE_VERSION: 1.94.0
 
 jobs:
   # ==========================================================================
@@ -37,19 +38,19 @@ jobs:
   # ==========================================================================
   quick-check:
     name: Quick Check
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # master
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_STABLE_VERSION }}
           components: rustfmt, clippy
 
       - name: Cache cargo
-        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v4
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
         with:
           path: |
             ~/.cargo/registry/index
@@ -87,13 +88,13 @@ jobs:
       matrix:
         include:
           - os: linux
-            runner: self-hosted
+            runner: ubuntu-latest
             rust: stable
           - os: linux
-            runner: self-hosted
+            runner: ubuntu-latest
             rust: beta
           - os: linux
-            runner: self-hosted
+            runner: ubuntu-latest
             rust: nightly
           - os: macos
             runner: macos-latest
@@ -105,10 +106,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # master
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
           toolchain: ${{ matrix.rust }}
 
@@ -125,7 +126,7 @@ jobs:
           echo "OPENSSL_DIR=$(brew --prefix openssl@3)" >> $GITHUB_ENV
 
       - name: Cache cargo
-        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v4
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
         with:
           path: |
             ~/.cargo/registry/index
@@ -150,18 +151,18 @@ jobs:
   # ==========================================================================
   msrv:
     name: MSRV Check
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Install MSRV toolchain
-        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # master
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
-          toolchain: "1.92.0"
+          toolchain: ${{ env.RUST_STABLE_VERSION }}
 
       - name: Cache cargo
-        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v4
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
         with:
           path: |
             ~/.cargo/registry/index
@@ -177,24 +178,24 @@ jobs:
   # ==========================================================================
   features:
     name: Feature Checks
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: quick-check
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # master
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_STABLE_VERSION }}
 
       - name: Install cargo-hack
-        uses: taiki-e/install-action@64c5c20c872907b6f7cd50994ac189e7274160f2 # main
+        uses: taiki-e/install-action@5ab5d1729c22acd8f798b267eadcfe5e5be6f5c2 # v2.68.27
         with:
           tool: cargo-hack
 
       - name: Cache cargo
-        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v4
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
         with:
           path: |
             ~/.cargo/registry/index
@@ -204,29 +205,29 @@ jobs:
           key: ${{ runner.os }}-features-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Check no default features
-        run: cargo check --no-default-features
+        run: cargo check --workspace --no-default-features
 
       - name: Check all features
-        run: cargo check --all-features
+        run: cargo check --workspace --all-features
 
       - name: Check feature combinations
-        run: cargo hack check --feature-powerset --no-dev-deps --exclude-no-default-features
+        run: cargo hack check --workspace --feature-powerset --no-dev-deps --exclude-no-default-features
 
   # ==========================================================================
   # Documentation
   # ==========================================================================
   docs:
     name: Documentation
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: quick-check
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # master
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_STABLE_VERSION }}
 
       - name: Build documentation
         run: cargo doc --all-features --no-deps
@@ -241,19 +242,19 @@ jobs:
   # ==========================================================================
   bench:
     name: Benchmarks
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: quick-check
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # master
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_STABLE_VERSION }}
 
       - name: Cache cargo
-        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v4
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
         with:
           path: |
             ~/.cargo/registry/index
@@ -270,25 +271,25 @@ jobs:
   # ==========================================================================
   coverage:
     name: Code Coverage
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: test
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # master
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_STABLE_VERSION }}
           components: llvm-tools-preview
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@64c5c20c872907b6f7cd50994ac189e7274160f2 # main
+        uses: taiki-e/install-action@5ab5d1729c22acd8f798b267eadcfe5e5be6f5c2 # v2.68.27
         with:
           tool: cargo-llvm-cov
 
       - name: Cache cargo
-        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v4
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
         with:
           path: |
             ~/.cargo/registry/index
@@ -301,7 +302,7 @@ jobs:
         run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5
+        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -312,7 +313,7 @@ jobs:
   # ==========================================================================
   ci-success:
     name: CI Success
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: [quick-check, test, msrv, features, docs, bench]
     if: always()
     steps:

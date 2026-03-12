@@ -1,6 +1,7 @@
-# Contributing to ThreatFlux Projects
+# Contributing to threatflux-atlassian
 
-Thank you for your interest in contributing! This document provides guidelines for contributing to ThreatFlux projects.
+Thank you for your interest in contributing. This document covers the workflow for the shared Atlassian SDK and CLI
+workspace.
 
 ## Code of Conduct
 
@@ -9,7 +10,7 @@ By participating in this project, you agree to maintain a respectful and inclusi
 ## Getting Started
 
 1. Fork the repository
-2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/PROJECT_NAME.git`
+2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/threatflux-atlassian.git`
 3. Create a branch: `git checkout -b feat/your-feature`
 4. Make your changes
 5. Run checks: `make ci`
@@ -46,10 +47,10 @@ We use [Conventional Commits](https://www.conventionalcommits.org/):
 ### Examples
 
 ```
-feat: add support for custom patterns
-fix: resolve memory leak in parser
-docs: update installation instructions
-refactor: simplify error handling
+feat: add Jira bulk transition command
+fix: handle Jira pagination correctly
+docs: update Atlassian client setup instructions
+refactor: simplify Remote MCP auth flow
 ```
 
 ### Breaking Changes
@@ -170,7 +171,7 @@ By contributing, you agree that your contributions will be licensed under the MI
 ## Questions?
 
 - **Email**: admin@threatflux.ai
-- Open a [Discussion](https://github.com/threatflux/PROJECT_NAME/discussions)
-- Check existing [Issues](https://github.com/threatflux/PROJECT_NAME/issues)
+- Open a [Discussion](https://github.com/ThreatFlux/threatflux-atlassian/discussions)
+- Check existing [Issues](https://github.com/ThreatFlux/threatflux-atlassian/issues)
 
 Thank you for contributing!

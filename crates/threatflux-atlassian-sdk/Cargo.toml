@@ -1,0 +1,45 @@
+[package]
+name = "threatflux-atlassian-sdk"
+version.workspace = true
+edition = "2021"
+rust-version = "1.94"
+description = "ThreatFlux Atlassian SDK for Jira and Atlassian Remote MCP integrations"
+license = "MIT"
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/threatflux-atlassian-sdk"
+readme = "README.md"
+keywords = ["atlassian", "jira", "sdk", "oauth", "mcp"]
+categories = ["api-bindings", "web-programming"]
+
+[features]
+default = ["full"]
+full = ["direct", "remote"]
+direct = []
+remote = []
+ssl-verification = []
+
+[dependencies]
+base64 = { workspace = true }
+chrono = { workspace = true }
+dotenvy = { workspace = true }
+fluxencrypt = { workspace = true }
+rand = { workspace = true }
+reqwest = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+url = { workspace = true, features = ["serde"] }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio-test = { workspace = true }
+serial_test = { workspace = true }
+tracing-subscriber = { workspace = true }
+wiremock = { workspace = true }

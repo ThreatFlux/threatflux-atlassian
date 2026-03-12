@@ -1,0 +1,33 @@
+[package]
+name = "threatflux-atlassian-cli"
+version.workspace = true
+edition = "2021"
+rust-version = "1.94"
+description = "ThreatFlux CLI for Atlassian (Jira) workflows"
+license = "MIT"
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["atlassian", "jira", "cli", "sdk", "threatflux"]
+categories = ["command-line-utilities", "api-bindings"]
+
+[[bin]]
+name = "tflux-atlassian"
+path = "src/main.rs"
+
+[dependencies]
+threatflux-atlassian-sdk = { workspace = true }
+anyhow.workspace = true
+base64.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing-subscriber.workspace = true
+tracing.workspace = true
+url.workspace = true
+fluxencrypt.workspace = true
+dotenvy.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

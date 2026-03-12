@@ -38,6 +38,7 @@ allow = [
     "MPL-2.0",
     "BSL-1.0",
     "0BSD",
+    "OpenSSL",
 ]
 
 # Private crates can have any license
@@ -79,7 +80,9 @@ yanked = "warn"
 
 # Ignore specific advisories (add with justification)
 ignore = [
-    # Example: "RUSTSEC-2020-0001", # Reason for ignoring
+    # fluxencrypt currently depends on rsa 0.9.x and RustSec has not published
+    # a fixed upgrade path for RUSTSEC-2023-0071 yet.
+    "RUSTSEC-2023-0071",
 ]
 
 # =============================================================================
