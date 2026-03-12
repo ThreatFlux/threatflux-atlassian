@@ -161,8 +161,36 @@ jobs:
       - name: Update version
         run: |
           VERSION="${{ needs.check.outputs.next_version }}"
-          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          import os
+
+          version = os.environ["VERSION"]
+          cargo_toml = Path("Cargo.toml")
+          content = cargo_toml.read_text()
+
+          content, package_replacements = re.subn(
+              r'(?m)^version = ".*"$',
+              f'version = "{version}"',
+              content,
+              count=1,
+          )
+          content, dependency_replacements = re.subn(
+              r'(?m)^(threatflux-atlassian-sdk = \{ path = "crates/threatflux-atlassian-sdk", version = ").*(" \})$',
+              rf'\g<1>{version}\2',
+              content,
+              count=1,
+          )
+
+          if package_replacements != 1 or dependency_replacements != 1:
+              raise SystemExit("failed to update Cargo.toml release versions")
+
+          cargo_toml.write_text(content)
+          PY
           cargo check 2>/dev/null || true  # Update Cargo.lock
+        env:
+          VERSION: ${{ needs.check.outputs.next_version }}
 
       - name: Generate changelog
         run: |
