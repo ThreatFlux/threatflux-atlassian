@@ -1,6 +1,6 @@
 # ThreatFlux Security Workflow
 # Comprehensive security scanning pipeline
-# Version: 1.1.0
+# Version: 1.1.1
 
 name: Security
 
@@ -166,6 +166,11 @@ jobs:
           extra_args: --only-verified
         continue-on-error: true
 
+      - name: Gitleaks Scan
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   # ==========================================================================
   # Unsafe Code Analysis
   # ==========================================================================
@@ -221,13 +226,14 @@ jobs:
   security-success:
     name: Security Success
     runs-on: ubuntu-latest
-    needs: [audit, deny, supply-chain]
+    needs: [audit, deny, supply-chain, secrets]
     if: always()
     steps:
       - name: Check security jobs
         run: |
           if [[ "${{ needs.audit.result }}" != "success" || \
-                "${{ needs.deny.result }}" != "success" ]]; then
+                "${{ needs.deny.result }}" != "success" || \
+                "${{ needs.secrets.result }}" != "success" ]]; then
             echo "Security checks failed"
             exit 1
           fi

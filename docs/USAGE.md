@@ -13,7 +13,7 @@ For a released tag:
 
 ```toml
 [dependencies]
-threatflux-atlassian-sdk = { git = "https://github.com/ThreatFlux/threatflux-atlassian.git", tag = "v0.3.2" }
+threatflux-atlassian-sdk = { git = "https://github.com/ThreatFlux/threatflux-atlassian.git", tag = "v0.4.0" }
 ```
 
 ## Direct Jira REST Usage
@@ -72,6 +72,12 @@ cargo build -p threatflux-atlassian-cli --release
 ./target/release/tflux-atlassian --help
 ```
 
+Install from a pinned repo tag:
+
+```bash
+cargo install --git https://github.com/ThreatFlux/threatflux-atlassian.git --tag v0.4.0 threatflux-atlassian-cli
+```
+
 Typical commands:
 
 ```bash
@@ -99,4 +105,5 @@ make ci
 - Release artifacts are built around the CLI binary `tflux-atlassian`.
 - GitHub releases attach CycloneDX SBOMs for the SDK and CLI crates.
 - The container image embeds a CycloneDX SBOM at `/usr/share/doc/threatflux-atlassian/sbom.cdx.json`.
-- `cargo publish` must publish `threatflux-atlassian-sdk` before `threatflux-atlassian-cli`.
+- Release publishing verifies the SDK first, publishes it, waits for crates.io index propagation, then verifies and
+  publishes the CLI.
