@@ -1,6 +1,6 @@
 # ThreatFlux Security Workflow
 # Comprehensive security scanning pipeline
-# Version: 1.1.1
+# Version: 1.1.2
 
 name: Security
 
@@ -154,6 +154,9 @@ jobs:
   secrets:
     name: Secret Scanning
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -166,10 +169,33 @@ jobs:
           extra_args: --only-verified
         continue-on-error: true
 
-      - name: Gitleaks Scan
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+      - name: Install Gitleaks
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: "8.30.0"
+        run: |
+          set -euo pipefail
+          curl -fsSLo gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSLo gitleaks_checksums.txt \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          grep " gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz$" gitleaks_checksums.txt | sha256sum --check --
+          tar -xzf gitleaks.tar.gz gitleaks
+          sudo install gitleaks /usr/local/bin/gitleaks
+
+      - name: Gitleaks Scan
+        run: |
+          gitleaks git . \
+            --no-banner \
+            --redact \
+            --exit-code 1 \
+            --report-format sarif \
+            --report-path gitleaks.sarif
+
+      - name: Upload Gitleaks results
+        uses: github/codeql-action/upload-sarif@0c0c5dc2f136b98cb0537075ccfa21f94cd9a63e # codeql-bundle-v2.24.3
+        with:
+          sarif_file: gitleaks.sarif
+        if: always() && hashFiles('gitleaks.sarif') != ''
 
   # ==========================================================================
   # Unsafe Code Analysis
