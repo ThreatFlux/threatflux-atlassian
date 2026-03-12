@@ -30,7 +30,7 @@ Based on project complexity:
 [![Crates.io](https://img.shields.io/crates/v/PROJECT.svg)](https://crates.io/crates/PROJECT)
 [![Documentation](https://docs.rs/PROJECT/badge.svg)](https://docs.rs/PROJECT)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.92%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.94%2B-orange.svg)](https://www.rust-lang.org)
 [![CI](https://github.com/threatflux/PROJECT/actions/workflows/ci.yml/badge.svg)](https://github.com/threatflux/PROJECT/actions/workflows/ci.yml)
 [![Security](https://github.com/threatflux/PROJECT/actions/workflows/security.yml/badge.svg)](https://github.com/threatflux/PROJECT/actions/workflows/security.yml)
 [![codecov](https://codecov.io/gh/threatflux/PROJECT/branch/main/graph/badge.svg)](https://codecov.io/gh/threatflux/PROJECT)
@@ -120,7 +120,7 @@ migrations/
 1. **No code examples** - Always include runnable code
 2. **Missing license** - Always specify MIT
 3. **No badges** - Add at minimum: CI, License, Rust version
-4. **Outdated Rust version** - Keep MSRV current (1.92.0)
+4. **Outdated Rust version** - Keep MSRV current (1.94.0)
 5. **No installation section** - Show Cargo.toml entry
 6. **Walls of text** - Use lists, tables, code blocks
 7. **Separate SQL migration files** - Use embedded migrations pattern

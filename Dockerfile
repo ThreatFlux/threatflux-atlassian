@@ -4,7 +4,7 @@
 # =============================================================================
 # Build Stage
 # =============================================================================
-FROM rust:1.92-bookworm AS builder
+FROM rust:1.94-bookworm AS builder
 
 # Build arguments
 ARG VERSION=0.0.0
@@ -35,6 +35,14 @@ COPY --chown=builder:builder README.md LICENSE CONTRIBUTING.md SECURITY.md ./
 
 RUN cargo build --release -p threatflux-atlassian-cli --bin ${BINARY_NAME} --all-features
 
+RUN cargo install cargo-cyclonedx --locked --version 0.5.8 && \
+    cargo cyclonedx \
+      --manifest-path crates/threatflux-atlassian-cli/Cargo.toml \
+      --all-features \
+      --format json \
+      --spec-version 1.5 \
+      --override-filename threatflux-atlassian-cli-sbom
+
 # =============================================================================
 # Runtime Stage
 # =============================================================================
@@ -61,13 +69,15 @@ RUN apt-get update && apt-get install -y \
     libssl3 \
     tini \
     && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /usr/share/doc/threatflux-atlassian \
     && useradd -m -u 1000 app
 
 # Copy binary from builder
 COPY --from=builder /build/target/release/${BINARY_NAME} /usr/local/bin/app
+COPY --from=builder /build/crates/threatflux-atlassian-cli/threatflux-atlassian-cli-sbom.json /usr/share/doc/threatflux-atlassian/sbom.cdx.json
 
 # Set ownership
-RUN chown app:app /usr/local/bin/app
+RUN chown -R app:app /usr/local/bin/app /usr/share/doc/threatflux-atlassian
 
 # Switch to non-root user
 USER app

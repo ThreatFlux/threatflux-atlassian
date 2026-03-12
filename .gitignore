@@ -15,6 +15,7 @@
 lcov.info
 *.profraw
 *.profdata
+sbom/
 
 # Build artifacts
 *.o

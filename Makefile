@@ -7,7 +7,7 @@
 # =============================================================================
 
 CARGO ?= cargo
-RUST_MSRV ?= 1.92.0
+RUST_MSRV ?= 1.94.0
 RUST_TOOLCHAIN ?= stable
 
 # Docker configuration
@@ -70,6 +70,7 @@ dev-setup: ## Install development tools
 	@cargo install cargo-llvm-cov --locked 2>/dev/null || echo "cargo-llvm-cov already installed"
 	@cargo install cargo-audit --locked 2>/dev/null || echo "cargo-audit already installed"
 	@cargo install cargo-deny --locked 2>/dev/null || echo "cargo-deny already installed"
+	@cargo install cargo-cyclonedx --locked 2>/dev/null || echo "cargo-cyclonedx already installed"
 	@cargo install cargo-hack --locked 2>/dev/null || echo "cargo-hack already installed"
 	@echo "$(GREEN)Development tools installed!$(NC)"
 
@@ -210,6 +211,18 @@ deny: ## Check licenses and advisories
 	@echo "$(CYAN)Running cargo-deny...$(NC)"
 	@cargo deny check
 	@echo "$(GREEN)Deny checks passed!$(NC)"
+
+.PHONY: sbom
+sbom: ## Generate CycloneDX SBOMs for the SDK and CLI
+	@echo "$(CYAN)Generating SBOMs...$(NC)"
+	@mkdir -p sbom
+	@rm -f sbom/*.json crates/threatflux-atlassian-sdk/threatflux-atlassian-sdk-sbom.json crates/threatflux-atlassian-cli/threatflux-atlassian-cli-sbom.json
+	@cargo cyclonedx --manifest-path crates/threatflux-atlassian-sdk/Cargo.toml --all-features --format json --spec-version 1.5 --override-filename threatflux-atlassian-sdk-sbom
+	@cargo cyclonedx --manifest-path crates/threatflux-atlassian-cli/Cargo.toml --all-features --format json --spec-version 1.5 --override-filename threatflux-atlassian-cli-sbom
+	@cp crates/threatflux-atlassian-sdk/threatflux-atlassian-sdk-sbom.json sbom/
+	@cp crates/threatflux-atlassian-cli/threatflux-atlassian-cli-sbom.json sbom/
+	@rm -f crates/threatflux-atlassian-sdk/*-sbom.json crates/threatflux-atlassian-cli/*-sbom.json
+	@echo "$(GREEN)SBOMs written to sbom/$(NC)"
 
 .PHONY: security
 security: audit deny ## Run all security checks

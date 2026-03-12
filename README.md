@@ -77,8 +77,11 @@ threatflux-atlassian/
 This repo keeps the standard ThreatFlux template pieces:
 
 - pinned GitHub Actions workflows
+- Rust 1.94.0 as the current pinned release/MSRV baseline
 - `Makefile`-driven local CI
 - release, docker, and security pipelines
+- CycloneDX SBOMs attached to GitHub releases and generated in CI
+- a runtime container SBOM embedded at `/usr/share/doc/threatflux-atlassian/sbom.cdx.json`
 
 The template files were adapted for a Rust workspace with a library crate and a CLI crate instead of a single root
 binary crate.

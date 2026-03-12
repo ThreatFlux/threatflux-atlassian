@@ -2,7 +2,7 @@
 name = "threatflux-atlassian-sdk"
 version.workspace = true
 edition = "2021"
-rust-version = "1.92"
+rust-version = "1.94"
 description = "ThreatFlux Atlassian SDK for Jira and Atlassian Remote MCP integrations"
 license = "MIT"
 repository.workspace = true

@@ -90,10 +90,13 @@ make dev-setup
 make fmt
 make lint
 make test
+make sbom
 make ci
 ```
 
 ## Release Notes
 
 - Release artifacts are built around the CLI binary `tflux-atlassian`.
+- GitHub releases attach CycloneDX SBOMs for the SDK and CLI crates.
+- The container image embeds a CycloneDX SBOM at `/usr/share/doc/threatflux-atlassian/sbom.cdx.json`.
 - `cargo publish` must publish `threatflux-atlassian-sdk` before `threatflux-atlassian-cli`.
