@@ -1,6 +1,6 @@
 # ThreatFlux Security Workflow
 # Comprehensive security scanning pipeline
-# Version: 1.1.0
+# Version: 1.1.2
 
 name: Security
 
@@ -154,6 +154,9 @@ jobs:
   secrets:
     name: Secret Scanning
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -165,6 +168,35 @@ jobs:
         with:
           extra_args: --only-verified
         continue-on-error: true
+
+      - name: Install Gitleaks
+        env:
+          GITLEAKS_VERSION: "8.30.0"
+        run: |
+          set -euo pipefail
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSLo "${archive}" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}"
+          curl -fsSLo gitleaks_checksums.txt \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          grep " ${archive}$" gitleaks_checksums.txt | sha256sum --check --
+          tar -xzf "${archive}" gitleaks
+          sudo install gitleaks /usr/local/bin/gitleaks
+
+      - name: Gitleaks Scan
+        run: |
+          gitleaks git . \
+            --no-banner \
+            --redact \
+            --exit-code 1 \
+            --report-format sarif \
+            --report-path gitleaks.sarif
+
+      - name: Upload Gitleaks results
+        uses: github/codeql-action/upload-sarif@0c0c5dc2f136b98cb0537075ccfa21f94cd9a63e # codeql-bundle-v2.24.3
+        with:
+          sarif_file: gitleaks.sarif
+        if: always() && hashFiles('gitleaks.sarif') != ''
 
   # ==========================================================================
   # Unsafe Code Analysis
@@ -221,13 +253,14 @@ jobs:
   security-success:
     name: Security Success
     runs-on: ubuntu-latest
-    needs: [audit, deny, supply-chain]
+    needs: [audit, deny, supply-chain, secrets]
     if: always()
     steps:
       - name: Check security jobs
         run: |
           if [[ "${{ needs.audit.result }}" != "success" || \
-                "${{ needs.deny.result }}" != "success" ]]; then
+                "${{ needs.deny.result }}" != "success" || \
+                "${{ needs.secrets.result }}" != "success" ]]; then
             echo "Security checks failed"
             exit 1
           fi

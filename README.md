@@ -28,7 +28,7 @@ It carries the full Atlassian integration surface that previously lived in `core
 
 ```toml
 [dependencies]
-threatflux-atlassian-sdk = { git = "https://github.com/ThreatFlux/threatflux-atlassian.git", tag = "v0.3.2" }
+threatflux-atlassian-sdk = { git = "https://github.com/ThreatFlux/threatflux-atlassian.git", tag = "v0.4.0" }
 ```
 
 ```rust
@@ -44,7 +44,7 @@ println!("{}", issue.key);
 ### Install the CLI
 
 ```bash
-cargo install --git https://github.com/ThreatFlux/threatflux-atlassian.git threatflux-atlassian-cli
+cargo install --git https://github.com/ThreatFlux/threatflux-atlassian.git --tag v0.4.0 threatflux-atlassian-cli
 tflux-atlassian --help
 ```
 
@@ -85,6 +85,10 @@ This repo keeps the standard ThreatFlux template pieces:
 
 The template files were adapted for a Rust workspace with a library crate and a CLI crate instead of a single root
 binary crate.
+
+The release workflow publishes the SDK before the CLI and waits for the SDK version to appear in the crates.io index
+before publishing the CLI. Pinned git tags like the examples above remain the safest documented consumption path until
+the corresponding crates.io releases are available.
 
 ## License
 

@@ -10,7 +10,7 @@ workspace for Atlassian integrations.
 | Cargo layout | Single root crate | Virtual workspace with SDK and CLI crates |
 | Source tree | `src/lib.rs` and `src/main.rs` at repo root | `crates/threatflux-atlassian-sdk` and `crates/threatflux-atlassian-cli` |
 | CI feature checks | Root-crate feature checks | Workspace-wide feature checks |
-| Release flow | Publish/build one root package | Build the CLI package and publish SDK before CLI |
+| Release flow | Publish/build one root package | Build the CLI package, verify SDK publishability, publish SDK, wait for crates.io propagation, then verify/publish CLI |
 | Docker build | Compile root binary | Compile `tflux-atlassian` from the CLI crate |
 | Documentation | Generic template README | Repo-specific README plus usage docs |
 
@@ -24,7 +24,7 @@ workspace for Atlassian integrations.
    - the `dev` branch
    - workspace-aware Cargo commands
    - CLI-specific binary packaging
-   - ordered crates.io publish steps
+   - ordered crates.io publish steps with index propagation handling
 4. The root [Makefile](../Makefile) was updated so local CI commands operate on the workspace rather than a single
    package.
 5. Repo-specific documentation was added in [README.md](../README.md) and [USAGE.md](./USAGE.md).
