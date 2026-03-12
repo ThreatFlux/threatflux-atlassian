@@ -1,0 +1,31 @@
+# Generated files
+/target/
+# Note: Cargo.lock IS committed for applications (reproducible builds)
+# Uncomment below for library-only crates:
+# Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Coverage
+lcov.info
+*.profraw
+*.profdata
+
+# Build artifacts
+*.o
+*.so
+*.dylib
+*.dll
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
