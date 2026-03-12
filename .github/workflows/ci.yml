@@ -37,7 +37,7 @@ jobs:
   # ==========================================================================
   quick-check:
     name: Quick Check
-    runs-on: Ubuntu-large
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4
@@ -87,13 +87,13 @@ jobs:
       matrix:
         include:
           - os: linux
-            runner: Ubuntu-large
+            runner: ubuntu-latest
             rust: stable
           - os: linux
-            runner: Ubuntu-large
+            runner: ubuntu-latest
             rust: beta
           - os: linux
-            runner: Ubuntu-large
+            runner: ubuntu-latest
             rust: nightly
           - os: macos
             runner: macos-latest
@@ -150,7 +150,7 @@ jobs:
   # ==========================================================================
   msrv:
     name: MSRV Check
-    runs-on: Ubuntu-large
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4
@@ -177,7 +177,7 @@ jobs:
   # ==========================================================================
   features:
     name: Feature Checks
-    runs-on: Ubuntu-large
+    runs-on: ubuntu-latest
     needs: quick-check
     steps:
       - name: Checkout
@@ -217,7 +217,7 @@ jobs:
   # ==========================================================================
   docs:
     name: Documentation
-    runs-on: Ubuntu-large
+    runs-on: ubuntu-latest
     needs: quick-check
     steps:
       - name: Checkout
@@ -241,7 +241,7 @@ jobs:
   # ==========================================================================
   bench:
     name: Benchmarks
-    runs-on: Ubuntu-large
+    runs-on: ubuntu-latest
     needs: quick-check
     steps:
       - name: Checkout
@@ -270,7 +270,7 @@ jobs:
   # ==========================================================================
   coverage:
     name: Code Coverage
-    runs-on: Ubuntu-large
+    runs-on: ubuntu-latest
     needs: test
     steps:
       - name: Checkout
@@ -312,7 +312,7 @@ jobs:
   # ==========================================================================
   ci-success:
     name: CI Success
-    runs-on: Ubuntu-large
+    runs-on: ubuntu-latest
     needs: [quick-check, test, msrv, features, docs, bench]
     if: always()
     steps:

@@ -37,7 +37,7 @@ jobs:
   # ==========================================================================
   check:
     name: Check for Release
-    runs-on: Ubuntu-large
+    runs-on: ubuntu-latest
     if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     outputs:
       should_release: ${{ steps.check.outputs.should_release }}
@@ -136,7 +136,7 @@ jobs:
     name: Create Release
     needs: check
     if: needs.check.outputs.should_release == 'true'
-    runs-on: Ubuntu-large
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
