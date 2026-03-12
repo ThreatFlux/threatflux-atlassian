@@ -11,10 +11,16 @@ use crate::types::{
 };
 use base64::prelude::*;
 use reqwest::{Certificate, Client, ClientBuilder, Method, Response};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;
 use tracing::{debug, error, info, warn};
+
+#[derive(Debug, Deserialize)]
+struct CreateIssueResponse {
+    key: String,
+}
 
 /// Main client for Atlassian/Jira API operations
 #[derive(Debug)]
@@ -97,11 +103,10 @@ impl AtlassianClient {
         body: Option<&Value>,
         query_params: Option<&HashMap<String, String>>,
     ) -> Result<Response> {
-        let url = if endpoint.starts_with('/') {
-            format!("{}{}", self.config.base_url, endpoint)
-        } else {
-            format!("{}/{}", self.config.base_url, endpoint)
-        };
+        let url = self
+            .config
+            .base_url
+            .join(endpoint.trim_start_matches('/'))?;
 
         debug!("Making {} request to: {}", method, url);
 
@@ -114,7 +119,7 @@ impl AtlassianClient {
 
         let mut request = self
             .client
-            .request(method, &url)
+            .request(method, url)
             .header("Authorization", auth_header)
             .header("Content-Type", "application/json")
             .header("Accept", "application/json");
@@ -278,10 +283,10 @@ impl AtlassianClient {
             .make_request(Method::POST, endpoint, Some(&body), None)
             .await?;
 
-        let created_issue: JiraIssue = response.json().await?;
+        let created_issue: CreateIssueResponse = response.json().await?;
         info!("Successfully created issue: {}", created_issue.key);
 
-        Ok(created_issue)
+        self.get_issue(&created_issue.key).await
     }
 
     /// Search for issues using JQL
@@ -748,7 +753,10 @@ impl Clone for AtlassianClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::{CreateIssueFields, IssueTypeReference, ProjectReference};
     use std::time::Duration;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn create_test_config() -> AtlassianConfig {
         AtlassianConfig::new(
@@ -805,5 +813,97 @@ mod tests {
         let value = AtlassianClient::story_points_json_value(5.0).unwrap();
 
         assert_eq!(value.as_f64(), Some(5.0));
+    }
+
+    #[tokio::test]
+    async fn test_create_issue_fetches_issue_after_create_response() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/rest/api/2/issue"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+                "id": "10001",
+                "key": "TEST-123",
+                "self": format!("{}/rest/api/2/issue/10001", server.uri()),
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/rest/api/2/issue/TEST-123"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "10001",
+                "key": "TEST-123",
+                "self": format!("{}/rest/api/2/issue/10001", server.uri()),
+                "fields": {
+                    "summary": "Created issue",
+                    "description": "Test description",
+                    "issuetype": {
+                        "id": "10000",
+                        "name": "Task",
+                        "description": "Task issue",
+                        "iconUrl": null,
+                        "subtask": false
+                    },
+                    "status": {
+                        "id": "1",
+                        "name": "To Do",
+                        "description": "Pending work",
+                        "category": {
+                            "id": 2,
+                            "key": "new",
+                            "name": "To Do",
+                            "colorName": "blue-gray"
+                        }
+                    },
+                    "priority": null,
+                    "assignee": null,
+                    "reporter": null,
+                    "project": {
+                        "id": "10000",
+                        "key": "TEST",
+                        "name": "Test Project",
+                        "description": null,
+                        "projectTypeKey": "software",
+                        "avatarUrls": null
+                    },
+                    "created": null,
+                    "updated": null,
+                    "resolutiondate": null,
+                    "labels": [],
+                    "components": []
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let config = AtlassianConfig::builder()
+            .base_url(server.uri())
+            .username("test@example.com")
+            .api_token("test-token")
+            .verify_ssl(false)
+            .build()
+            .unwrap();
+        let client = AtlassianClient::new(config).unwrap();
+
+        let request = CreateIssueRequest {
+            fields: CreateIssueFields {
+                project: ProjectReference::by_key("TEST"),
+                summary: "Created issue".to_string(),
+                issue_type: IssueTypeReference::by_name("Task"),
+                description: Some("Test description".to_string()),
+                assignee: None,
+                priority: None,
+                labels: None,
+                components: None,
+                parent: None,
+                custom_fields: HashMap::new(),
+            },
+        };
+
+        let created_issue = client.create_issue(request).await.unwrap();
+
+        assert_eq!(created_issue.key, "TEST-123");
+        assert_eq!(created_issue.fields.summary, "Created issue");
     }
 }

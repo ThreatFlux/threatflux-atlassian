@@ -104,41 +104,34 @@ impl AtlassianConfig {
     /// let config = AtlassianConfig::from_env().unwrap();
     /// ```
     pub fn from_env() -> Result<Self> {
+        Self::from_env_with_overrides(None, None, None)
+    }
+
+    /// Create configuration from environment variables with optional overrides for the required
+    /// Jira credentials.
+    pub fn from_env_with_overrides(
+        base_url_override: Option<String>,
+        username_override: Option<String>,
+        api_token_override: Option<String>,
+    ) -> Result<Self> {
         load_encrypted_env_file_if_present()?;
 
-        let base_url = env::var("JIRA_URL")
-            .map_err(|_| AtlassianError::config("JIRA_URL environment variable not set"))?;
-
-        let username = load_required_secret("JIRA_USERNAME")?;
-        let api_token = load_required_secret("JIRA_API_TOKEN")?;
+        let base_url = match normalize_override("JIRA_URL", base_url_override)? {
+            Some(value) => value,
+            None => env::var("JIRA_URL")
+                .map_err(|_| AtlassianError::config("JIRA_URL environment variable not set"))?,
+        };
+        let username = match normalize_override("JIRA_USERNAME", username_override)? {
+            Some(value) => value,
+            None => load_required_secret("JIRA_USERNAME")?,
+        };
+        let api_token = match normalize_override("JIRA_API_TOKEN", api_token_override)? {
+            Some(value) => value,
+            None => load_required_secret("JIRA_API_TOKEN")?,
+        };
 
         let mut config = Self::new(base_url, username, api_token)?;
-
-        // Optional timeout configuration
-        if let Ok(timeout_str) = env::var("JIRA_TIMEOUT") {
-            if let Ok(timeout_secs) = timeout_str.parse::<u64>() {
-                config.timeout = Duration::from_secs(timeout_secs);
-            } else {
-                return Err(AtlassianError::config("Invalid JIRA_TIMEOUT value"));
-            }
-        }
-
-        // Optional SSL certificate path
-        if let Ok(cert_path) = env::var("JIRA_CERT_PATH") {
-            config.cert_path = Some(PathBuf::from(cert_path));
-        }
-
-        // SSL verification setting
-        if let Ok(verify_ssl_str) = env::var("JIRA_VERIFY_SSL") {
-            config.verify_ssl = verify_ssl_str.to_lowercase() != "false";
-        }
-
-        // Optional max retries
-        if let Ok(retries_str) = env::var("JIRA_MAX_RETRIES") {
-            if let Ok(retries) = retries_str.parse::<u32>() {
-                config.max_retries = retries;
-            }
-        }
+        apply_optional_env_settings(&mut config)?;
 
         Ok(config)
     }
@@ -200,6 +193,49 @@ impl AtlassianConfig {
 
         Ok(())
     }
+}
+
+fn normalize_override(name: &str, value: Option<String>) -> Result<Option<String>> {
+    match value {
+        Some(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                return Err(AtlassianError::config(format!("{name} override is empty")));
+            }
+            Ok(Some(trimmed.to_string()))
+        }
+        None => Ok(None),
+    }
+}
+
+fn apply_optional_env_settings(config: &mut AtlassianConfig) -> Result<()> {
+    // Optional timeout configuration
+    if let Ok(timeout_str) = env::var("JIRA_TIMEOUT") {
+        if let Ok(timeout_secs) = timeout_str.parse::<u64>() {
+            config.timeout = Duration::from_secs(timeout_secs);
+        } else {
+            return Err(AtlassianError::config("Invalid JIRA_TIMEOUT value"));
+        }
+    }
+
+    // Optional SSL certificate path
+    if let Ok(cert_path) = env::var("JIRA_CERT_PATH") {
+        config.cert_path = Some(PathBuf::from(cert_path));
+    }
+
+    // SSL verification setting
+    if let Ok(verify_ssl_str) = env::var("JIRA_VERIFY_SSL") {
+        config.verify_ssl = verify_ssl_str.to_lowercase() != "false";
+    }
+
+    // Optional max retries
+    if let Ok(retries_str) = env::var("JIRA_MAX_RETRIES") {
+        if let Ok(retries) = retries_str.parse::<u32>() {
+            config.max_retries = retries;
+        }
+    }
+
+    Ok(())
 }
 
 /// Builder for AtlassianConfig
@@ -737,5 +773,21 @@ mod tests {
         assert_eq!(config.base_url.as_str(), "https://env.atlassian.net/");
         assert_eq!(config.username, "env-user@example.com");
         assert_eq!(config.api_token, "env-token");
+    }
+
+    #[test]
+    #[serial]
+    fn from_env_with_overrides_uses_cli_value_for_missing_secret() {
+        let _guard_url = EnvGuard::set("JIRA_URL", "https://example.atlassian.net");
+        let _guard_user = EnvGuard::set("JIRA_USERNAME", "env-user@example.com");
+        let _guard_token = EnvGuard::unset("JIRA_API_TOKEN");
+
+        let config =
+            AtlassianConfig::from_env_with_overrides(None, None, Some("cli-token".to_string()))
+                .unwrap();
+
+        assert_eq!(config.base_url.as_str(), "https://example.atlassian.net/");
+        assert_eq!(config.username, "env-user@example.com");
+        assert_eq!(config.api_token, "cli-token");
     }
 }

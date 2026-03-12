@@ -22,7 +22,6 @@ use serde::Serialize;
 use serde_json::{self, json};
 use threatflux_atlassian_sdk::{AtlassianClient, AtlassianConfig, CreateIssueRequest, JiraField};
 use tracing::Level;
-use url::Url;
 
 /// Default maximum number of issues to return when not specified.
 const DEFAULT_ISSUE_LIMIT: u32 = 50;
@@ -409,59 +408,12 @@ fn init_tracing(verbose: bool) {
 }
 
 fn build_config(cli: &Cli) -> Result<AtlassianConfig> {
-    let env_config = AtlassianConfig::from_env();
-    let mut config = match env_config {
-        Ok(cfg) => cfg,
-        Err(env_err) => {
-            let base = cli
-                .base_url
-                .as_ref()
-                .ok_or_else(|| anyhow!("{}", env_err))?;
-            let username = cli
-                .username
-                .as_ref()
-                .ok_or_else(|| anyhow!("{}", env_err))?;
-            let token = cli
-                .api_token
-                .as_ref()
-                .ok_or_else(|| anyhow!("{}", env_err))?;
-
-            let mut builder = AtlassianConfig::builder()
-                .base_url(base.clone())
-                .username(username.clone())
-                .api_token(token.clone());
-
-            if let Some(timeout) = cli.timeout {
-                builder = builder.timeout(Duration::from_secs(timeout));
-            }
-
-            if cli.insecure {
-                builder = builder.verify_ssl(false);
-            }
-
-            builder
-                .build()
-                .context("failed to construct Atlassian config from CLI arguments")?
-        }
-    };
-
-    if let Some(base_url) = &cli.base_url {
-        let parsed = Url::parse(base_url)
-            .with_context(|| format!("invalid Jira base URL override: {base_url}"))?;
-        config.base_url = parsed;
-    }
-
-    if let Some(username) = &cli.username {
-        config.username = username.clone();
-    }
-
-    if let Some(api_token) = &cli.api_token {
-        let trimmed = api_token.trim();
-        if trimmed.is_empty() {
-            bail!("API token cannot be empty");
-        }
-        config.api_token = trimmed.to_string();
-    }
+    let mut config = AtlassianConfig::from_env_with_overrides(
+        cli.base_url.clone(),
+        cli.username.clone(),
+        cli.api_token.clone(),
+    )
+    .context("failed to construct Atlassian config from environment and CLI arguments")?;
 
     if let Some(timeout) = cli.timeout {
         config.timeout = Duration::from_secs(timeout);
