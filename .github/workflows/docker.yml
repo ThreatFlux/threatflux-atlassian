@@ -31,7 +31,7 @@ jobs:
   # ==========================================================================
   build:
     name: Build Docker Image
-    runs-on: ubuntu-latest-16-cores
+    runs-on: Ubuntu-large
     permissions:
       contents: read
       packages: write
@@ -118,7 +118,7 @@ jobs:
   scan:
     name: Security Scan
     needs: build
-    runs-on: ubuntu-latest-16-cores
+    runs-on: Ubuntu-large
     permissions:
       contents: read
       security-events: write
@@ -176,7 +176,7 @@ jobs:
   sign:
     name: Sign Container
     needs: [build, scan]
-    runs-on: ubuntu-latest-16-cores
+    runs-on: Ubuntu-large
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
@@ -213,7 +213,7 @@ jobs:
   sbom:
     name: Generate SBOM
     needs: build
-    runs-on: ubuntu-latest-16-cores
+    runs-on: Ubuntu-large
     if: github.event_name != 'pull_request'
 
     steps:
@@ -244,7 +244,7 @@ jobs:
   # ==========================================================================
   docker-success:
     name: Docker Success
-    runs-on: ubuntu-latest-16-cores
+    runs-on: Ubuntu-large
     needs: [build, scan]
     if: always()
     steps:
