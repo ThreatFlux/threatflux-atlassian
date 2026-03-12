@@ -4,7 +4,7 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.1.x   | :white_check_mark: |
+| 0.3.x   | :white_check_mark: |
 
 ## Reporting a Vulnerability
 
@@ -13,7 +13,7 @@
 ### How to Report
 
 1. **Email**: Send details to security@threatflux.ai
-2. **GitHub Security Advisories**: Use the [Security tab](https://github.com/threatflux/PROJECT_NAME/security/advisories) to report privately
+2. **GitHub Security Advisories**: Use the [Security tab](https://github.com/ThreatFlux/threatflux-atlassian/security/advisories) to report privately
 
 ### What to Include
 
@@ -69,7 +69,12 @@ We consider security research conducted in good faith to be authorized. We will 
 
 ## Security Features
 
-If this project has security-relevant features, document them here.
+This project contains security-relevant capabilities:
+
+- Jira automation against production Atlassian Cloud tenants
+- API-token based authentication flows
+- Atlassian Remote MCP / OAuth support
+- reusable request/response models that may be embedded in other ThreatFlux services
 
 ## Acknowledgments
 

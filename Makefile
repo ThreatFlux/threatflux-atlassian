@@ -14,6 +14,9 @@ RUST_TOOLCHAIN ?= stable
 DOCKER_IMAGE ?= $(shell basename $(CURDIR))
 DOCKER_TAG ?= latest
 DOCKER_REGISTRY ?= ghcr.io/threatflux
+BINARY_PACKAGE ?= threatflux-atlassian-cli
+BINARY_NAME ?= tflux-atlassian
+PUBLISH_PACKAGES ?= threatflux-atlassian-sdk threatflux-atlassian-cli
 
 # Coverage configuration
 COVERAGE_IGNORE ?=
@@ -158,17 +161,17 @@ test-doc: ## Run documentation tests
 test-features: ## Test feature combinations
 	@echo "$(CYAN)Testing feature combinations...$(NC)"
 	@echo "$(BLUE)  No default features...$(NC)"
-	@$(CARGO) check --no-default-features
+	@$(CARGO) check --workspace --no-default-features
 	@echo "$(BLUE)  All features...$(NC)"
-	@$(CARGO) check --all-features
+	@$(CARGO) check --workspace --all-features
 	@echo "$(BLUE)  Default features only...$(NC)"
-	@$(CARGO) check
+	@$(CARGO) check --workspace
 	@echo "$(GREEN)Feature checks passed!$(NC)"
 
 .PHONY: test-features-full
 test-features-full: ## Test all feature powerset (requires cargo-hack)
 	@echo "$(CYAN)Testing full feature powerset...$(NC)"
-	@cargo hack check --feature-powerset --no-dev-deps
+	@cargo hack check --workspace --feature-powerset --no-dev-deps
 	@echo "$(GREEN)Feature powerset passed!$(NC)"
 
 # =============================================================================
@@ -297,7 +300,10 @@ release-check: ## Check release readiness
 	@echo "$(CYAN)Checking release readiness...$(NC)"
 	@$(MAKE) ci
 	@$(MAKE) msrv
-	@cargo publish --dry-run
+	@for pkg in $(PUBLISH_PACKAGES); do \
+		echo "$(BLUE)  cargo publish --dry-run -p $$pkg$(NC)"; \
+		cargo publish --dry-run -p $$pkg; \
+	done
 	@echo "$(GREEN)Ready for release!$(NC)"
 
 # =============================================================================

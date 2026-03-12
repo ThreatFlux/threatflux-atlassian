@@ -1,128 +1,88 @@
-# ThreatFlux Rust CI/CD Template
+# threatflux-atlassian
 
-Standardized CI/CD templates for Rust projects. Uses **Rust 1.92.0** as the minimum supported version.
+ThreatFlux Atlassian SDK and CLI workspace, extracted from the core monorepo and layered onto the standard ThreatFlux
+Rust CI/CD template.
 
-## Features
+This repo is the shared home for:
 
-- **Pinned GitHub Actions** - All actions use commit SHAs for security
-- **Self-hosted runners** - Configured for self-hosted infrastructure
-- **Comprehensive CI** - Format, lint, test, coverage, MSRV, feature testing
-- **Security scanning** - cargo-audit, cargo-deny, SBOM, secret scanning
-- **Multi-platform releases** - Linux (amd64/arm64), macOS (amd64/arm64), Windows
-- **Docker support** - Multi-arch builds with security scanning and signing
-- **Auto-release** - Automatic releases from conventional commits
+- `threatflux-atlassian-sdk`
+- `threatflux-atlassian-cli`
+
+It carries the full Atlassian integration surface that previously lived in `core`:
+
+- Jira Cloud REST automation using API-token authentication
+- Atlassian Remote MCP / OAuth client support
+- reusable Jira request/response types
+- an operator CLI for common Jira workflows
+
+## Crates
+
+| Crate | Purpose |
+| ----- | ------- |
+| `threatflux-atlassian-sdk` | Shared Rust SDK for Jira REST and Atlassian Remote MCP |
+| `threatflux-atlassian-cli` | CLI wrapper around the SDK (`tflux-atlassian`) |
 
 ## Quick Start
 
+### Use the SDK from another Rust project
+
+```toml
+[dependencies]
+threatflux-atlassian-sdk = { git = "https://github.com/ThreatFlux/threatflux-atlassian.git", tag = "v0.3.2" }
+```
+
+```rust
+use threatflux_atlassian_sdk::AtlassianClient;
+
+# tokio_test::block_on(async {
+let client = AtlassianClient::from_env().unwrap();
+let issue = client.get_issue("KAN-123").await.unwrap();
+println!("{}", issue.key);
+# });
+```
+
+### Install the CLI
+
 ```bash
-# Clone this template
-gh repo create my-project --template threatflux/rust-cicd-template
+cargo install --git https://github.com/ThreatFlux/threatflux-atlassian.git threatflux-atlassian-cli
+tflux-atlassian --help
+```
 
-# Or copy files to existing project
-cp -r .github Makefile deny.toml Dockerfile /path/to/your/project/
+### Develop locally
 
-# Install development tools
+```bash
 make dev-setup
-
-# Run CI checks locally
 make ci
 ```
 
-## Workflows
+Additional usage examples live in [docs/USAGE.md](docs/USAGE.md).
+Template adaptation notes live in [docs/TEMPLATE_ADAPTATION.md](docs/TEMPLATE_ADAPTATION.md).
 
-| Workflow | Purpose | Trigger |
-|----------|---------|---------|
-| `ci.yml` | Build, test, lint, coverage | Push, PR, Weekly |
-| `security.yml` | Security audit, license check, SBOM | Push, PR, Weekly |
-| `release.yml` | Multi-platform release builds | Tags |
-| `auto-release.yml` | Automatic version bumps | CI success |
-| `docker.yml` | Container builds with scanning | Push, PR, Weekly |
+## Workspace Layout
 
-## Makefile Targets
-
-```bash
-make help          # Show all targets
-make dev-setup     # Install development tools
-make ci            # Run full CI checks
-make ci-quick      # Run quick checks only
-make test          # Run tests
-make lint          # Run clippy
-make lint-strict   # Run strict clippy (pedantic + nursery)
-make coverage      # Generate code coverage
-make security      # Run security checks
-make docker-build  # Build Docker image
+```text
+threatflux-atlassian/
+├── .github/workflows/         # ThreatFlux CI/CD template workflows
+├── crates/
+│   ├── threatflux-atlassian-sdk/
+│   └── threatflux-atlassian-cli/
+├── docs/
+├── Cargo.toml
+├── Makefile
+└── LICENSE
 ```
 
-## Configuration
+## CI/CD Template Integration
 
-### Rust Version
+This repo keeps the standard ThreatFlux template pieces:
 
-MSRV is set to **1.92.0**. Update in:
-- `Cargo.toml` - `rust-version`
-- `Makefile` - `RUST_MSRV`
-- `.github/workflows/ci.yml` - MSRV job toolchain
-- `Dockerfile` - Base image version
+- pinned GitHub Actions workflows
+- `Makefile`-driven local CI
+- release, docker, and security pipelines
 
-### Clippy Flags
-
-Strict configuration (pedantic + nursery):
-```
--D warnings
--D clippy::all
--D clippy::pedantic
--D clippy::nursery
--A clippy::multiple_crate_versions
--A clippy::module_name_repetitions
--A clippy::missing_errors_doc
--A clippy::missing_panics_doc
--A clippy::must_use_candidate
-```
-
-### Required Secrets
-
-| Secret | Purpose |
-|--------|---------|
-| `CODECOV_TOKEN` | Coverage uploads |
-| `CARGO_REGISTRY_TOKEN` | crates.io publishing |
-
-## Conventional Commits
-
-Use conventional commits for automatic changelog generation:
-
-- `feat:` - New features (bumps minor)
-- `fix:` - Bug fixes (bumps patch)
-- `BREAKING CHANGE:` - Breaking changes (bumps major)
-- `chore:` - Maintenance
-- `docs:` - Documentation
-
-## Database Migrations
-
-ThreatFlux projects use **embedded migrations** - all SQL is in Rust code, not separate files:
-
-```rust
-// src/migrations.rs - Migrations run automatically on startup
-pub const MIGRATIONS: &[&str] = &[
-    "CREATE TABLE IF NOT EXISTS users (id UUID PRIMARY KEY, email TEXT UNIQUE);",
-    "ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT;",
-];
-```
-
-Key principles:
-- No separate `.sql` migration files
-- Idempotent statements (`IF NOT EXISTS`)
-- Auto-run on server startup
-- Single binary deployment
-
-See [docs/README_STANDARDS.md](docs/README_STANDARDS.md) for details.
-
-## Contact
-
-- **General**: admin@threatflux.ai
-- **Security**: security@threatflux.ai
-- **Privacy**: privacy@threatflux.ai
-
-See [SECURITY.md](SECURITY.md) for vulnerability reporting.
+The template files were adapted for a Rust workspace with a library crate and a CLI crate instead of a single root
+binary crate.
 
 ## License
 
-MIT - ThreatFlux
+See [LICENSE](./LICENSE).
