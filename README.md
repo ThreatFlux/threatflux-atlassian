@@ -90,8 +90,8 @@ The release workflow publishes the SDK before the CLI and waits for the SDK vers
 before publishing the CLI. Pinned git tags like the examples above remain the safest documented consumption path until
 the corresponding crates.io releases are available.
 
-For GitHub Actions publishing, the release workflow accepts either a `CARGO_REGISTRY_TOKEN` secret or a shared
-`CRATES_IO_TOKEN` secret at the repo/org level.
+For GitHub Actions publishing, the recommended setup is a shared repo/org `CRATES_IO_TOKEN` secret so every workspace
+release job uses the same token source. The workflow also accepts `CARGO_REGISTRY_TOKEN` as a compatibility fallback.
 
 ## License
 

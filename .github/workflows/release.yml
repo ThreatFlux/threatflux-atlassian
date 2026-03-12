@@ -1,6 +1,6 @@
 # ThreatFlux Release Workflow
 # Automated release with multi-platform builds
-# Version: 1.1.3
+# Version: 1.1.4
 
 name: Release
 
@@ -93,12 +93,14 @@ jobs:
           TAG="v${{ steps.version.outputs.version }}"
           TITLE="Release v${{ steps.version.outputs.version }}"
 
-          if gh release view "$TAG" >/dev/null 2>&1; then
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release edit "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
               --title "$TITLE" \
               --notes-file release_notes.md
           else
             gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
               --title "$TITLE" \
               --notes-file release_notes.md \
               ${{ (github.event.inputs.prerelease || contains(steps.version.outputs.version, '-')) && '--prerelease' || '' }}
@@ -252,11 +254,13 @@ jobs:
 
       - name: Upload to release
         run: |
-          for file in artifacts/**/*; do
-            if [ -f "$file" ]; then
-              gh release upload "v${{ needs.prepare.outputs.version }}" "$file" --clobber
-            fi
-          done
+          set -euo pipefail
+
+          while IFS= read -r -d '' file; do
+            gh release upload "v${{ needs.prepare.outputs.version }}" "$file" \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          done < <(find artifacts -type f -print0)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -291,20 +295,60 @@ jobs:
             echo "Skipping crates.io publish - CARGO_REGISTRY_TOKEN / CRATES_IO_TOKEN not configured"
           fi
 
-      - name: Verify SDK publish
+      - name: Determine publish state
+        id: publish_state
         if: steps.check_token.outputs.has_token == 'true'
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          version = os.environ["RELEASE_VERSION"]
+          output_path = os.environ["GITHUB_OUTPUT"]
+          crate_outputs = {
+              "sdk_published": os.environ["SDK_PACKAGE"],
+              "cli_published": os.environ["CLI_PACKAGE"],
+          }
+
+          with open(output_path, "a", encoding="utf-8") as output:
+              for output_name, crate_name in crate_outputs.items():
+                  url = f"https://crates.io/api/v1/crates/{crate_name}"
+                  try:
+                      with urllib.request.urlopen(url, timeout=30) as response:
+                          payload = json.load(response)
+                  except urllib.error.HTTPError as exc:
+                      if exc.code != 404:
+                          raise
+                      versions = set()
+                  else:
+                      versions = {item["num"] for item in payload.get("versions", [])}
+
+                  published = version in versions
+                  print(f"{output_name}={'true' if published else 'false'}", file=output)
+                  print(
+                      f"{crate_name} {version} "
+                      f"{'already exists on crates.io' if published else 'is not published yet'}"
+                  )
+          PY
+
+      - name: Verify SDK publish
+        if: steps.check_token.outputs.has_token == 'true' && steps.publish_state.outputs.sdk_published != 'true'
         run: cargo publish -p ${{ env.SDK_PACKAGE }} --locked --dry-run
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}
 
       - name: Publish SDK to crates.io
-        if: steps.check_token.outputs.has_token == 'true'
+        if: steps.check_token.outputs.has_token == 'true' && steps.publish_state.outputs.sdk_published != 'true'
         run: cargo publish -p ${{ env.SDK_PACKAGE }} --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}
 
       - name: Wait for SDK version on crates.io
-        if: steps.check_token.outputs.has_token == 'true'
+        if: steps.check_token.outputs.has_token == 'true' && steps.publish_state.outputs.cli_published != 'true'
         env:
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
@@ -344,17 +388,21 @@ jobs:
           exit 1
 
       - name: Verify CLI publish
-        if: steps.check_token.outputs.has_token == 'true'
+        if: steps.check_token.outputs.has_token == 'true' && steps.publish_state.outputs.cli_published != 'true'
         run: cargo publish -p ${{ env.CLI_PACKAGE }} --locked --dry-run
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}
 
       - name: Publish CLI to crates.io
-        if: steps.check_token.outputs.has_token == 'true'
+        if: steps.check_token.outputs.has_token == 'true' && steps.publish_state.outputs.cli_published != 'true'
         run: |
           cargo publish -p ${{ env.CLI_PACKAGE }} --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}
+
+      - name: Report publish reuse
+        if: steps.check_token.outputs.has_token == 'true' && steps.publish_state.outputs.sdk_published == 'true' && steps.publish_state.outputs.cli_published == 'true'
+        run: echo "All crates for v${{ needs.prepare.outputs.version }} already exist on crates.io; skipping publish"
 
   # ==========================================================================
   # Release Success Gate
