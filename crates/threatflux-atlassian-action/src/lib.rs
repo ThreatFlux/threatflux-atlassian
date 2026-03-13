@@ -50,8 +50,14 @@ pub async fn run_from_env() -> Result<ActionOutcome> {
     let config_raw = fs::read_to_string(&config_path)?;
     let config = config::load_config_from_str(&config_raw)?;
 
-    let event_name = env::var("INPUT_EVENT_NAME").or_else(|_| env::var("GITHUB_EVENT_NAME"))?;
-    let event_path = env::var("INPUT_EVENT_PATH").or_else(|_| env::var("GITHUB_EVENT_PATH"))?;
+    let event_name =
+        resolve_env_alias("INPUT_EVENT_NAME", "GITHUB_EVENT_NAME").ok_or_else(|| {
+            anyhow::anyhow!("Missing event name: set INPUT_EVENT_NAME or GITHUB_EVENT_NAME")
+        })?;
+    let event_path =
+        resolve_env_alias("INPUT_EVENT_PATH", "GITHUB_EVENT_PATH").ok_or_else(|| {
+            anyhow::anyhow!("Missing event path: set INPUT_EVENT_PATH or GITHUB_EVENT_PATH")
+        })?;
     let event_payload = fs::read_to_string(event_path)?;
     let event = github::load_issue_event_from_str(&event_name, &event_payload)?;
 
@@ -71,12 +77,10 @@ pub async fn run_from_env() -> Result<ActionOutcome> {
 }
 
 fn build_client_from_env() -> Result<AtlassianClient> {
-    let base_url = env::var("JIRA_BASE_URL")
-        .or_else(|_| env::var("JIRA_URL"))
-        .map_err(|_| anyhow::anyhow!("Missing Jira base URL: set JIRA_BASE_URL or JIRA_URL"))?;
-    let username = env::var("JIRA_EMAIL")
-        .or_else(|_| env::var("JIRA_USERNAME"))
-        .map_err(|_| anyhow::anyhow!("Missing Jira username: set JIRA_EMAIL or JIRA_USERNAME"))?;
+    let base_url = resolve_env_alias("JIRA_BASE_URL", "JIRA_URL")
+        .ok_or_else(|| anyhow::anyhow!("Missing Jira base URL: set JIRA_BASE_URL or JIRA_URL"))?;
+    let username = resolve_env_alias("JIRA_EMAIL", "JIRA_USERNAME")
+        .ok_or_else(|| anyhow::anyhow!("Missing Jira username: set JIRA_EMAIL or JIRA_USERNAME"))?;
     let api_token = env::var("JIRA_API_TOKEN")
         .map_err(|_| anyhow::anyhow!("Missing Jira API token: set JIRA_API_TOKEN"))?;
 
@@ -96,6 +100,14 @@ fn init_tracing() {
 
 fn parse_bool_input(name: &str) -> bool {
     env::var(name).is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "on"))
+}
+
+fn resolve_env_alias(primary: &str, alias: &str) -> Option<String> {
+    non_empty_env_var(primary).or_else(|| non_empty_env_var(alias))
+}
+
+fn non_empty_env_var(name: &str) -> Option<String> {
+    env::var(name).ok().filter(|value| !value.trim().is_empty())
 }
 
 async fn finalize_action<SearchFn, SearchFut, CreateFn, CreateFut>(
@@ -211,8 +223,8 @@ fn write_outputs(outcome: &ActionOutcome) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_client_from_env, parse_bool_input, run_from_env, write_outputs, ActionOutcome,
-        TestJiraHook, TEST_JIRA_HOOK,
+        build_client_from_env, parse_bool_input, resolve_env_alias, run_from_env, write_outputs,
+        ActionOutcome, TestJiraHook, TEST_JIRA_HOOK,
     };
     use serial_test::serial;
     use std::fs;
@@ -387,6 +399,52 @@ rules:
             "INPUT_DRY_RUN",
             "INPUT_EVENT_NAME",
             "INPUT_EVENT_PATH",
+            "GITHUB_EVENT_NAME",
+            "GITHUB_EVENT_PATH",
+            "GITHUB_OUTPUT",
+        ]);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn run_from_env_treats_blank_event_overrides_as_unset() {
+        let temp_root = unique_temp_dir("threatflux-atlassian-action");
+        fs::create_dir_all(&temp_root).expect("temp dir should be created");
+
+        let config_path = temp_root.join("jira-automation.yml");
+        let event_path = temp_root.join("event.json");
+        let output_path = temp_root.join("github-output.txt");
+
+        write_standard_config(&config_path);
+        write_matching_event(&event_path, "Severity: high\nPackage: foo");
+
+        std::env::set_var("INPUT_CONFIG_PATH", config_path.display().to_string());
+        std::env::set_var("INPUT_DRY_RUN", "true");
+        std::env::set_var("INPUT_EVENT_NAME", "");
+        std::env::set_var("INPUT_EVENT_PATH", "   ");
+        std::env::set_var("GITHUB_EVENT_NAME", "issues");
+        std::env::set_var("GITHUB_EVENT_PATH", event_path.display().to_string());
+        std::env::set_var("GITHUB_OUTPUT", output_path.display().to_string());
+
+        let outcome = run_from_env()
+            .await
+            .expect("blank event overrides should fall back to github event env");
+        let output = fs::read_to_string(&output_path).expect("github output should exist");
+
+        assert_eq!(
+            outcome.matched_rule_id.as_deref(),
+            Some("dependabot-high-issues")
+        );
+        assert_eq!(outcome.severity.as_deref(), Some("high"));
+        assert!(output.contains("matched-rule-id=dependabot-high-issues"));
+
+        cleanup_env(&[
+            "INPUT_CONFIG_PATH",
+            "INPUT_DRY_RUN",
+            "INPUT_EVENT_NAME",
+            "INPUT_EVENT_PATH",
+            "GITHUB_EVENT_NAME",
+            "GITHUB_EVENT_PATH",
             "GITHUB_OUTPUT",
         ]);
     }
@@ -483,6 +541,27 @@ rules:
 
     #[test]
     #[serial]
+    fn build_client_from_env_falls_back_to_aliases_when_primary_values_are_blank() {
+        std::env::set_var("JIRA_BASE_URL", "");
+        std::env::set_var("JIRA_URL", "https://example.atlassian.net");
+        std::env::set_var("JIRA_EMAIL", "   ");
+        std::env::set_var("JIRA_USERNAME", "bot@threatflux.dev");
+        std::env::set_var("JIRA_API_TOKEN", "secret");
+
+        let result = build_client_from_env();
+        assert!(result.is_ok());
+
+        cleanup_env(&[
+            "JIRA_BASE_URL",
+            "JIRA_URL",
+            "JIRA_EMAIL",
+            "JIRA_USERNAME",
+            "JIRA_API_TOKEN",
+        ]);
+    }
+
+    #[test]
+    #[serial]
     fn build_client_from_env_reports_missing_configuration() {
         cleanup_env(&[
             "JIRA_BASE_URL",
@@ -510,6 +589,18 @@ rules:
     fn parse_bool_input_returns_false_when_unset() {
         cleanup_env(&["INPUT_DRY_RUN"]);
         assert!(!parse_bool_input("INPUT_DRY_RUN"));
+    }
+
+    #[test]
+    #[serial]
+    fn resolve_env_alias_ignores_blank_primary_values() {
+        std::env::set_var("PRIMARY_ENV", "  ");
+        std::env::set_var("ALIAS_ENV", "fallback-value");
+
+        let resolved = resolve_env_alias("PRIMARY_ENV", "ALIAS_ENV");
+        assert_eq!(resolved.as_deref(), Some("fallback-value"));
+
+        cleanup_env(&["PRIMARY_ENV", "ALIAS_ENV"]);
     }
 
     #[test]
