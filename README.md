@@ -78,7 +78,8 @@ on:
   issues:
     types: [opened]
 
-permissions: {}
+permissions:
+  contents: read
 
 jobs:
   create-jira-issue:
@@ -89,7 +90,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: ThreatFlux/threatflux-atlassian@main
+      - uses: ThreatFlux/threatflux-atlassian@<tag-or-sha> # Replace with the first released ref after merge
         with:
           config-path: .github/threatflux/jira-automation.yml
         env:

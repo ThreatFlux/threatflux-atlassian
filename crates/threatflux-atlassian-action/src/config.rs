@@ -1,7 +1,9 @@
 use crate::rules::{is_supported_event_field_path, SUPPORTED_EVENT_NAME};
 use anyhow::Result;
 use regex::Regex;
+use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
+use serde_yaml::Value;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -41,6 +43,7 @@ pub struct SeverityExtractConfig {
 pub struct JiraRuleConfig {
     pub project_key: String,
     pub issue_type: String,
+    #[serde(default, deserialize_with = "empty_string_as_none")]
     pub assignee_account_id: Option<String>,
     pub priority_by_severity: BTreeMap<String, String>,
     pub summary: String,
@@ -55,7 +58,7 @@ pub struct JiraRuleConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DedupeConfig {
     pub strategy: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "empty_string_as_none")]
     pub label_prefix: Option<String>,
     pub fields: Vec<String>,
 }
@@ -64,14 +67,50 @@ fn default_description_format() -> String {
     "text".to_string()
 }
 
+fn empty_string_as_none<'de, D>(deserializer: D) -> std::result::Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<String>::deserialize(deserializer)?;
+    Ok(value.and_then(|inner| {
+        if inner.trim().is_empty() {
+            None
+        } else {
+            Some(inner)
+        }
+    }))
+}
+
 pub fn load_config_from_str(raw: &str) -> Result<AutomationConfig> {
-    let expanded = expand_env_vars(raw)?;
-    let config: AutomationConfig = serde_yaml::from_str(&expanded)?;
+    let mut value: Value = serde_yaml::from_str(raw)?;
+    expand_env_vars_in_value(&mut value)?;
+    let config: AutomationConfig = serde_yaml::from_value(value)?;
     validate_config(&config)?;
     Ok(config)
 }
 
-fn expand_env_vars(raw: &str) -> Result<String> {
+fn expand_env_vars_in_value(value: &mut Value) -> Result<()> {
+    match value {
+        Value::String(inner) => {
+            *inner = expand_env_vars_in_string(inner)?;
+        }
+        Value::Sequence(items) => {
+            for item in items {
+                expand_env_vars_in_value(item)?;
+            }
+        }
+        Value::Mapping(entries) => {
+            for entry in entries.values_mut() {
+                expand_env_vars_in_value(entry)?;
+            }
+        }
+        _ => {}
+    }
+
+    Ok(())
+}
+
+fn expand_env_vars_in_string(raw: &str) -> Result<String> {
     let pattern = Regex::new(r"\$\{([A-Z0-9_]+)(:-([^}]*))?\}")?;
     let mut rendered = String::with_capacity(raw.len());
     let mut last = 0;
@@ -97,7 +136,7 @@ fn expand_env_vars(raw: &str) -> Result<String> {
 
 fn resolve_env_var(name: &str, default: Option<&str>) -> Result<String> {
     match std::env::var(name) {
-        Ok(value) if !value.is_empty() => Ok(value),
+        Ok(value) if !value.trim().is_empty() => Ok(value),
         Ok(_) => default.map_or_else(|| Ok(String::new()), |value| Ok(value.to_string())),
         Err(_) => default.map_or_else(
             || anyhow::bail!("Missing required environment variable: {name}"),
@@ -285,6 +324,38 @@ rules:
 
     #[test]
     #[serial]
+    fn load_config_treats_whitespace_env_as_unset_when_default_is_present() {
+        std::env::set_var("JIRA_PROJECT_KEY", "   ");
+
+        let yaml = r#"
+version: 1
+rules:
+  - id: dependabot-high-issues
+    when:
+      event: issues
+      action: opened
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(high|critical)\b'
+    jira:
+      project_key: ${JIRA_PROJECT_KEY:-KAN}
+      issue_type: Bug
+      priority_by_severity:
+        high: High
+      summary: test
+      description: test
+      dedupe:
+        strategy: sha256
+        fields: [issue.title]
+"#;
+
+        let config = load_config_from_str(yaml).expect("config should load");
+        assert_eq!(config.rules[0].jira.project_key, "KAN");
+    }
+
+    #[test]
+    #[serial]
     fn load_config_rejects_missing_required_env_value() {
         std::env::remove_var("JIRA_PROJECT_KEY");
 
@@ -349,6 +420,44 @@ rules:
         let error =
             load_config_from_str(yaml).expect_err("empty required env should fail validation");
         assert!(error.to_string().contains("jira.project_key"));
+    }
+
+    #[test]
+    #[serial]
+    fn load_config_expands_env_values_without_yaml_structure_injection() {
+        std::env::set_var("JIRA_DESCRIPTION", "first line\njira:\n  injected: value");
+
+        let yaml = r#"
+version: 1
+rules:
+  - id: dependabot-high-issues
+    when:
+      event: issues
+      action: opened
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(high|critical)\b'
+    jira:
+      project_key: KAN
+      issue_type: Bug
+      priority_by_severity:
+        high: High
+      summary: test
+      description: ${JIRA_DESCRIPTION}
+      dedupe:
+        strategy: sha256
+        fields: [issue.title]
+"#;
+
+        let config = load_config_from_str(yaml).expect("config should load");
+        let rule = &config.rules[0];
+
+        assert_eq!(rule.jira.issue_type, "Bug");
+        assert_eq!(
+            rule.jira.description,
+            "first line\njira:\n  injected: value"
+        );
     }
 
     #[test]

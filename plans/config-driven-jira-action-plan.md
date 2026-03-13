@@ -91,7 +91,7 @@ Build a reusable GitHub Action in `threatflux-atlassian` that turns GitHub event
 Consumer repos should keep a minimal trigger workflow, for example:
 
 - trigger on `issues: opened`
-- keep `permissions: {}`
+- keep minimal permissions such as `contents: read` when the workflow checks out the repo
 - checkout the repo
 - run the shared action
 
