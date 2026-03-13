@@ -2,6 +2,7 @@
 members = [
     "crates/threatflux-atlassian-sdk",
     "crates/threatflux-atlassian-cli",
+    "crates/threatflux-atlassian-action",
 ]
 resolver = "2"
 
@@ -23,9 +24,11 @@ dotenvy = "0.15"
 fluxencrypt = "0.5.0"
 rand = "0.10.0"
 reqwest = { version = "0.13.2", default-features = false, features = ["form", "json", "query", "rustls"] }
+regex = "1.12.2"
 schemars = "0.8"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
+serde_yaml = "0.9.34"
 serial_test = "3.3.1"
 sha2 = "0.10.9"
 thiserror = "2.0.17"

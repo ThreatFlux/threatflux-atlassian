@@ -1,0 +1,29 @@
+name: Create Jira issue for HIGH Dependabot issues
+
+on:
+  issues:
+    types: [opened]
+
+permissions: {}
+
+jobs:
+  create-jira-issue:
+    if: |
+      github.event.issue.user.login == 'dependabot[bot]' ||
+      github.event.issue.user.login == 'dependabot-preview[bot]'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Create or dedupe Jira issue
+        uses: ThreatFlux/threatflux-atlassian@main
+        with:
+          config-path: .github/threatflux/jira-automation.yml
+        env:
+          JIRA_BASE_URL: ${{ vars.JIRA_BASE_URL }}
+          JIRA_EMAIL: ${{ vars.JIRA_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_PROJECT_KEY: ${{ vars.JIRA_PROJECT_KEY }}
+          JIRA_ASSIGNEE_ACCOUNT_ID: ${{ vars.JIRA_ASSIGNEE_ACCOUNT_ID }}

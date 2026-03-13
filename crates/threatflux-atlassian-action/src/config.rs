@@ -1,0 +1,503 @@
+use anyhow::Result;
+use regex::Regex;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AutomationConfig {
+    pub version: u32,
+    pub rules: Vec<RuleConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuleConfig {
+    pub id: String,
+    pub when: WhenConfig,
+    pub extract: ExtractConfig,
+    pub jira: JiraRuleConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WhenConfig {
+    pub event: String,
+    pub action: String,
+    #[serde(default)]
+    pub actor_in: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExtractConfig {
+    pub severity: SeverityExtractConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SeverityExtractConfig {
+    pub from: String,
+    pub regex: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct JiraRuleConfig {
+    pub project_key: String,
+    pub issue_type: String,
+    pub assignee_account_id: Option<String>,
+    pub priority_by_severity: BTreeMap<String, String>,
+    pub summary: String,
+    #[serde(default = "default_description_format")]
+    pub description_format: String,
+    pub description: String,
+    #[serde(default)]
+    pub labels: Vec<String>,
+    pub dedupe: DedupeConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DedupeConfig {
+    pub strategy: String,
+    #[serde(default)]
+    pub label_prefix: Option<String>,
+    pub fields: Vec<String>,
+}
+
+fn default_description_format() -> String {
+    "text".to_string()
+}
+
+pub fn load_config_from_str(raw: &str) -> Result<AutomationConfig> {
+    let expanded = expand_env_vars(raw)?;
+    let config: AutomationConfig = serde_yaml::from_str(&expanded)?;
+    validate_config(&config)?;
+    Ok(config)
+}
+
+fn expand_env_vars(raw: &str) -> Result<String> {
+    let pattern = Regex::new(r"\$\{([A-Z0-9_]+)(:-([^}]*))?\}")?;
+    let mut rendered = String::with_capacity(raw.len());
+    let mut last = 0;
+
+    for captures in pattern.captures_iter(raw) {
+        let matched = captures.get(0).expect("match should exist");
+        rendered.push_str(&raw[last..matched.start()]);
+
+        let name = captures
+            .get(1)
+            .expect("env var capture should exist")
+            .as_str();
+        let default = captures.get(3).map(|value| value.as_str());
+        let value = match std::env::var(name) {
+            Ok(value) => value,
+            Err(_) => match default {
+                Some(value) => value.to_string(),
+                None => anyhow::bail!("Missing required environment variable: {name}"),
+            },
+        };
+
+        rendered.push_str(&value);
+        last = matched.end();
+    }
+
+    rendered.push_str(&raw[last..]);
+    Ok(rendered)
+}
+
+fn validate_config(config: &AutomationConfig) -> Result<()> {
+    if config.version != 1 {
+        anyhow::bail!("Unsupported config version: {}", config.version);
+    }
+
+    if config.rules.is_empty() {
+        anyhow::bail!("Config must contain at least one rule");
+    }
+
+    for rule in &config.rules {
+        if rule.id.trim().is_empty() {
+            anyhow::bail!("Rule id cannot be empty");
+        }
+
+        if rule.when.event.trim().is_empty() || rule.when.action.trim().is_empty() {
+            anyhow::bail!("Rule '{}' must define non-empty event and action", rule.id);
+        }
+
+        if rule.extract.severity.from != "issue.body" {
+            anyhow::bail!(
+                "Rule '{}' has unsupported severity source '{}'",
+                rule.id,
+                rule.extract.severity.from
+            );
+        }
+
+        Regex::new(&rule.extract.severity.regex)?;
+
+        if rule.jira.project_key.trim().is_empty() || rule.jira.issue_type.trim().is_empty() {
+            anyhow::bail!(
+                "Rule '{}' must define non-empty jira.project_key and jira.issue_type",
+                rule.id
+            );
+        }
+
+        if rule.jira.description_format != "text" {
+            anyhow::bail!(
+                "Rule '{}' has unsupported description format '{}'",
+                rule.id,
+                rule.jira.description_format
+            );
+        }
+
+        if rule.jira.dedupe.fields.is_empty() {
+            anyhow::bail!("Rule '{}' must define at least one dedupe field", rule.id);
+        }
+
+        if rule.jira.dedupe.strategy != "sha256" {
+            anyhow::bail!(
+                "Rule '{}' has unsupported dedupe strategy '{}'",
+                rule.id,
+                rule.jira.dedupe.strategy
+            );
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::needless_raw_string_hashes)]
+#[allow(clippy::literal_string_with_formatting_args)]
+mod tests {
+    use super::load_config_from_str;
+    use serial_test::serial;
+
+    #[test]
+    #[serial]
+    fn load_config_expands_env_defaults_and_values() {
+        std::env::set_var("JIRA_ASSIGNEE_ACCOUNT_ID", "account-123");
+
+        let yaml = r#"
+version: 1
+rules:
+  - id: dependabot-high-issues
+    when:
+      event: issues
+      action: opened
+      actor_in:
+        - dependabot[bot]
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(high|critical)\b'
+    jira:
+      project_key: ${JIRA_PROJECT_KEY:-KAN}
+      issue_type: Bug
+      assignee_account_id: ${JIRA_ASSIGNEE_ACCOUNT_ID}
+      priority_by_severity:
+        high: High
+        critical: Highest
+      summary: "[Dependabot][{{ severity_title }}] {{ issue.title }}"
+      description: |
+        Repo: {{ repository.full_name }}
+      labels: [dependabot, security]
+      dedupe:
+        strategy: sha256
+        label_prefix: dependabot-alert
+        fields:
+          - repository.full_name
+          - issue.title
+"#;
+
+        let config = load_config_from_str(yaml).expect("config should load");
+        let rule = &config.rules[0];
+
+        assert_eq!(config.version, 1);
+        assert_eq!(rule.jira.project_key, "KAN");
+        assert_eq!(
+            rule.jira.assignee_account_id.as_deref(),
+            Some("account-123")
+        );
+        assert_eq!(rule.jira.description_format, "text");
+    }
+
+    #[test]
+    #[serial]
+    fn load_config_rejects_missing_required_env_value() {
+        std::env::remove_var("JIRA_ASSIGNEE_ACCOUNT_ID");
+
+        let yaml = r#"
+version: 1
+rules:
+  - id: dependabot-high-issues
+    when:
+      event: issues
+      action: opened
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(high|critical)\b'
+    jira:
+      project_key: KAN
+      issue_type: Bug
+      assignee_account_id: ${JIRA_ASSIGNEE_ACCOUNT_ID}
+      priority_by_severity:
+        high: High
+      summary: test
+      description: test
+      dedupe:
+        strategy: sha256
+        fields: [issue.title]
+"#;
+
+        let error = load_config_from_str(yaml).expect_err("missing env should fail");
+        assert!(
+            error.to_string().contains("JIRA_ASSIGNEE_ACCOUNT_ID"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn load_config_rejects_invalid_version() {
+        let error = load_config_from_str(
+            r#"
+version: 2
+rules:
+  - id: x
+    when:
+      event: issues
+      action: opened
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(high)\b'
+    jira:
+      project_key: KAN
+      issue_type: Bug
+      priority_by_severity:
+        high: High
+      summary: test
+      description: test
+      dedupe:
+        strategy: sha256
+        fields: [issue.title]
+"#,
+        )
+        .expect_err("invalid version should fail");
+        assert!(error.to_string().contains("Unsupported config version"));
+    }
+
+    #[test]
+    fn load_config_rejects_unsupported_description_format() {
+        let error = load_config_from_str(
+            r#"
+version: 1
+rules:
+  - id: x
+    when:
+      event: issues
+      action: opened
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(high)\b'
+    jira:
+      project_key: KAN
+      issue_type: Bug
+      priority_by_severity:
+        high: High
+      summary: test
+      description_format: adf
+      description: test
+      dedupe:
+        strategy: sha256
+        fields: [issue.title]
+"#,
+        )
+        .expect_err("unsupported format should fail");
+        assert!(error.to_string().contains("unsupported description format"));
+    }
+
+    #[test]
+    fn load_config_rejects_unsupported_severity_source() {
+        let error = load_config_from_str(
+            r#"
+version: 1
+rules:
+  - id: x
+    when:
+      event: issues
+      action: opened
+    extract:
+      severity:
+        from: issue.title
+        regex: '(?mi)^severity:\s*(high)\b'
+    jira:
+      project_key: KAN
+      issue_type: Bug
+      priority_by_severity:
+        high: High
+      summary: test
+      description: test
+      dedupe:
+        strategy: sha256
+        fields: [issue.title]
+"#,
+        )
+        .expect_err("unsupported severity source should fail");
+        assert!(error.to_string().contains("unsupported severity source"));
+    }
+
+    #[test]
+    fn load_config_rejects_unsupported_dedupe_strategy() {
+        let error = load_config_from_str(
+            r#"
+version: 1
+rules:
+  - id: x
+    when:
+      event: issues
+      action: opened
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(high)\b'
+    jira:
+      project_key: KAN
+      issue_type: Bug
+      priority_by_severity:
+        high: High
+      summary: test
+      description: test
+      dedupe:
+        strategy: sha1
+        fields: [issue.title]
+"#,
+        )
+        .expect_err("unsupported dedupe strategy should fail");
+        assert!(error.to_string().contains("unsupported dedupe strategy"));
+    }
+
+    #[test]
+    fn load_config_rejects_empty_rules() {
+        let error =
+            load_config_from_str("version: 1\nrules: []\n").expect_err("empty rules should fail");
+        assert!(error.to_string().contains("at least one rule"));
+    }
+
+    #[test]
+    fn load_config_rejects_empty_rule_id() {
+        let error = load_config_from_str(
+            r#"
+version: 1
+rules:
+  - id: "  "
+    when:
+      event: issues
+      action: opened
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(high)\b'
+    jira:
+      project_key: KAN
+      issue_type: Bug
+      priority_by_severity:
+        high: High
+      summary: test
+      description: test
+      dedupe:
+        strategy: sha256
+        fields: [issue.title]
+"#,
+        )
+        .expect_err("empty rule id should fail");
+        assert!(error.to_string().contains("Rule id cannot be empty"));
+    }
+
+    #[test]
+    fn load_config_rejects_empty_event_or_action() {
+        let error = load_config_from_str(
+            r#"
+version: 1
+rules:
+  - id: test
+    when:
+      event: ""
+      action: opened
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(high)\b'
+    jira:
+      project_key: KAN
+      issue_type: Bug
+      priority_by_severity:
+        high: High
+      summary: test
+      description: test
+      dedupe:
+        strategy: sha256
+        fields: [issue.title]
+"#,
+        )
+        .expect_err("empty event should fail");
+        assert!(error
+            .to_string()
+            .contains("must define non-empty event and action"));
+    }
+
+    #[test]
+    fn load_config_rejects_empty_project_key_or_issue_type() {
+        let error = load_config_from_str(
+            r#"
+version: 1
+rules:
+  - id: test
+    when:
+      event: issues
+      action: opened
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(high)\b'
+    jira:
+      project_key: ""
+      issue_type: Bug
+      priority_by_severity:
+        high: High
+      summary: test
+      description: test
+      dedupe:
+        strategy: sha256
+        fields: [issue.title]
+"#,
+        )
+        .expect_err("empty project key should fail");
+        assert!(error.to_string().contains("jira.project_key"));
+    }
+
+    #[test]
+    fn load_config_rejects_empty_dedupe_fields() {
+        let error = load_config_from_str(
+            r#"
+version: 1
+rules:
+  - id: test
+    when:
+      event: issues
+      action: opened
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(high)\b'
+    jira:
+      project_key: KAN
+      issue_type: Bug
+      priority_by_severity:
+        high: High
+      summary: test
+      description: test
+      dedupe:
+        strategy: sha256
+        fields: []
+"#,
+        )
+        .expect_err("empty dedupe fields should fail");
+        assert!(error.to_string().contains("at least one dedupe field"));
+    }
+}
