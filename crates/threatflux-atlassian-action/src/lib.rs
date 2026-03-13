@@ -95,9 +95,7 @@ fn init_tracing() {
 }
 
 fn parse_bool_input(name: &str) -> bool {
-    env::var(name).is_ok_and(|value| {
-        matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "on")
-    })
+    env::var(name).is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "on"))
 }
 
 async fn finalize_action<SearchFn, SearchFut, CreateFn, CreateFut>(
