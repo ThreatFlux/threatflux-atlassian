@@ -43,8 +43,8 @@ fn current_test_jira_hook() -> Option<TestJiraHook> {
 pub async fn run_from_env() -> Result<ActionOutcome> {
     init_tracing();
 
-    let config_path = env::var("INPUT_CONFIG_PATH")
-        .unwrap_or_else(|_| ".github/threatflux/jira-automation.yml".to_string());
+    let config_path = non_empty_env_var("INPUT_CONFIG_PATH")
+        .unwrap_or_else(|| ".github/threatflux/jira-automation.yml".to_string());
     let dry_run = parse_bool_input("INPUT_DRY_RUN");
 
     let config_raw = fs::read_to_string(&config_path)?;
@@ -445,6 +445,52 @@ rules:
             "INPUT_EVENT_PATH",
             "GITHUB_EVENT_NAME",
             "GITHUB_EVENT_PATH",
+            "GITHUB_OUTPUT",
+        ]);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn run_from_env_treats_blank_config_path_as_default() {
+        let temp_root = unique_temp_dir("threatflux-atlassian-action");
+        let config_root = temp_root.join(".github").join("threatflux");
+        fs::create_dir_all(&config_root).expect("config dir should be created");
+
+        let config_path = config_root.join("jira-automation.yml");
+        let event_path = temp_root.join("event.json");
+        let output_path = temp_root.join("github-output.txt");
+
+        write_standard_config(&config_path);
+        write_matching_event(&event_path, "Severity: high\nPackage: foo");
+
+        std::env::set_var("INPUT_CONFIG_PATH", "   ");
+        std::env::set_var("INPUT_DRY_RUN", "true");
+        std::env::set_var("INPUT_EVENT_NAME", "issues");
+        std::env::set_var("INPUT_EVENT_PATH", event_path.display().to_string());
+        std::env::set_var("GITHUB_OUTPUT", output_path.display().to_string());
+
+        let current_dir = std::env::current_dir().expect("cwd should be readable");
+        std::env::set_current_dir(&temp_root).expect("cwd should switch to temp root");
+
+        let outcome = run_from_env()
+            .await
+            .expect("blank config path should fall back to the default path");
+        let output = fs::read_to_string(&output_path).expect("github output should exist");
+
+        std::env::set_current_dir(current_dir).expect("cwd should be restored");
+
+        assert_eq!(
+            outcome.matched_rule_id.as_deref(),
+            Some("dependabot-high-issues")
+        );
+        assert_eq!(outcome.severity.as_deref(), Some("high"));
+        assert!(output.contains("matched-rule-id=dependabot-high-issues"));
+
+        cleanup_env(&[
+            "INPUT_CONFIG_PATH",
+            "INPUT_DRY_RUN",
+            "INPUT_EVENT_NAME",
+            "INPUT_EVENT_PATH",
             "GITHUB_OUTPUT",
         ]);
     }
