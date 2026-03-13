@@ -40,7 +40,9 @@ pub fn build_create_issue_request(
             assignee: rule
                 .jira
                 .assignee_account_id
-                .as_ref()
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
                 .map(UserReference::by_account_id),
             priority: Some(PriorityReference {
                 name: Some(priority),
@@ -257,6 +259,60 @@ rules:
         let error = build_create_issue_request(&config.rules[0], &event, &matched)
             .expect_err("missing priority mapping should fail");
         assert!(error.to_string().contains("No Jira priority mapping"));
+    }
+
+    #[test]
+    fn build_create_issue_request_skips_blank_assignee_account_id() {
+        let config = load_config_from_str(
+            r#"
+version: 1
+rules:
+  - id: dependabot-high-issues
+    when:
+      event: issues
+      action: opened
+      actor_in: ["dependabot[bot]"]
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(high|critical)\b'
+    jira:
+      project_key: KAN
+      issue_type: Bug
+      assignee_account_id: "   "
+      priority_by_severity:
+        high: High
+        critical: Highest
+      summary: "[Dependabot][{{ severity_title }}] {{ issue.title }}"
+      description: "{{ issue.body }}"
+      dedupe:
+        strategy: sha256
+        fields: [repository.full_name, issue.title]
+"#,
+        )
+        .expect("config should load");
+        let event = load_issue_event_from_str(
+            "issues",
+            r#"{
+  "action": "opened",
+  "issue": {
+    "title": "Bump foo",
+    "body": "Severity: high",
+    "html_url": "https://github.com/ThreatFlux/demo/issues/1",
+    "user": { "login": "dependabot[bot]" }
+  },
+  "repository": { "full_name": "ThreatFlux/demo" }
+}"#,
+        )
+        .expect("event should parse");
+        let matched = evaluate_rule(&config.rules[0], &event)
+            .expect("rule evaluation should succeed")
+            .expect("rule should match");
+
+        let request = build_create_issue_request(&config.rules[0], &event, &matched)
+            .expect("request should build");
+
+        assert!(request.fields.assignee.is_none());
     }
 
     #[test]

@@ -14,7 +14,7 @@ rules:
     jira:
       project_key: ${JIRA_PROJECT_KEY:-KAN}
       issue_type: Bug
-      assignee_account_id: ${JIRA_ASSIGNEE_ACCOUNT_ID}
+      assignee_account_id: ${JIRA_ASSIGNEE_ACCOUNT_ID:-}
       priority_by_severity:
         high: High
         critical: Highest

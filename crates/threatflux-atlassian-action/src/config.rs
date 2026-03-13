@@ -84,13 +84,7 @@ fn expand_env_vars(raw: &str) -> Result<String> {
             .expect("env var capture should exist")
             .as_str();
         let default = captures.get(3).map(|value| value.as_str());
-        let value = match std::env::var(name) {
-            Ok(value) => value,
-            Err(_) => match default {
-                Some(value) => value.to_string(),
-                None => anyhow::bail!("Missing required environment variable: {name}"),
-            },
-        };
+        let value = resolve_env_var(name, default)?;
 
         rendered.push_str(&value);
         last = matched.end();
@@ -98,6 +92,17 @@ fn expand_env_vars(raw: &str) -> Result<String> {
 
     rendered.push_str(&raw[last..]);
     Ok(rendered)
+}
+
+fn resolve_env_var(name: &str, default: Option<&str>) -> Result<String> {
+    match std::env::var(name) {
+        Ok(value) if !value.is_empty() => Ok(value),
+        Ok(_) => default.map_or_else(|| Ok(String::new()), |value| Ok(value.to_string())),
+        Err(_) => default.map_or_else(
+            || anyhow::bail!("Missing required environment variable: {name}"),
+            |value| Ok(value.to_string()),
+        ),
+    }
 }
 
 fn validate_config(config: &AutomationConfig) -> Result<()> {
@@ -126,7 +131,13 @@ fn validate_config(config: &AutomationConfig) -> Result<()> {
             );
         }
 
-        Regex::new(&rule.extract.severity.regex)?;
+        let severity_pattern = Regex::new(&rule.extract.severity.regex)?;
+        if severity_pattern.captures_len() < 2 {
+            anyhow::bail!(
+                "Rule '{}' severity regex must define capture group 1 for extraction",
+                rule.id
+            );
+        }
 
         if rule.jira.project_key.trim().is_empty() || rule.jira.issue_type.trim().is_empty() {
             anyhow::bail!(
@@ -187,7 +198,7 @@ rules:
     jira:
       project_key: ${JIRA_PROJECT_KEY:-KAN}
       issue_type: Bug
-      assignee_account_id: ${JIRA_ASSIGNEE_ACCOUNT_ID}
+      assignee_account_id: ${JIRA_ASSIGNEE_ACCOUNT_ID:-}
       priority_by_severity:
         high: High
         critical: Highest
@@ -217,7 +228,8 @@ rules:
 
     #[test]
     #[serial]
-    fn load_config_rejects_missing_required_env_value() {
+    fn load_config_treats_empty_env_as_unset_when_default_is_present() {
+        std::env::set_var("JIRA_PROJECT_KEY", "");
         std::env::remove_var("JIRA_ASSIGNEE_ACCOUNT_ID");
 
         let yaml = r#"
@@ -232,9 +244,44 @@ rules:
         from: issue.body
         regex: '(?mi)^severity:\s*(high|critical)\b'
     jira:
-      project_key: KAN
+      project_key: ${JIRA_PROJECT_KEY:-KAN}
       issue_type: Bug
-      assignee_account_id: ${JIRA_ASSIGNEE_ACCOUNT_ID}
+      assignee_account_id: ${JIRA_ASSIGNEE_ACCOUNT_ID:-}
+      priority_by_severity:
+        high: High
+      summary: test
+      description: test
+      dedupe:
+        strategy: sha256
+        fields: [issue.title]
+"#;
+
+        let config = load_config_from_str(yaml).expect("config should load");
+        let rule = &config.rules[0];
+
+        assert_eq!(rule.jira.project_key, "KAN");
+        assert_eq!(rule.jira.assignee_account_id, None);
+    }
+
+    #[test]
+    #[serial]
+    fn load_config_rejects_missing_required_env_value() {
+        std::env::remove_var("JIRA_PROJECT_KEY");
+
+        let yaml = r#"
+version: 1
+rules:
+  - id: dependabot-high-issues
+    when:
+      event: issues
+      action: opened
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(high|critical)\b'
+    jira:
+      project_key: ${JIRA_PROJECT_KEY}
+      issue_type: Bug
       priority_by_severity:
         high: High
       summary: test
@@ -245,10 +292,43 @@ rules:
 "#;
 
         let error = load_config_from_str(yaml).expect_err("missing env should fail");
-        assert!(
-            error.to_string().contains("JIRA_ASSIGNEE_ACCOUNT_ID"),
-            "unexpected error: {error}"
+        assert_eq!(
+            error.to_string(),
+            "Missing required environment variable: JIRA_PROJECT_KEY"
         );
+    }
+
+    #[test]
+    #[serial]
+    fn load_config_keeps_empty_required_env_when_no_default_is_provided() {
+        std::env::set_var("JIRA_PROJECT_KEY", "");
+
+        let yaml = r#"
+version: 1
+rules:
+  - id: dependabot-high-issues
+    when:
+      event: issues
+      action: opened
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(high|critical)\b'
+    jira:
+      project_key: ${JIRA_PROJECT_KEY}
+      issue_type: Bug
+      priority_by_severity:
+        high: High
+      summary: test
+      description: test
+      dedupe:
+        strategy: sha256
+        fields: [issue.title]
+"#;
+
+        let error =
+            load_config_from_str(yaml).expect_err("empty required env should fail validation");
+        assert!(error.to_string().contains("jira.project_key"));
     }
 
     #[test]
@@ -499,5 +579,35 @@ rules:
         )
         .expect_err("empty dedupe fields should fail");
         assert!(error.to_string().contains("at least one dedupe field"));
+    }
+
+    #[test]
+    fn load_config_rejects_severity_regex_without_capture_group() {
+        let error = load_config_from_str(
+            r#"
+version: 1
+rules:
+  - id: test
+    when:
+      event: issues
+      action: opened
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*high\b'
+    jira:
+      project_key: KAN
+      issue_type: Bug
+      priority_by_severity:
+        high: High
+      summary: test
+      description: test
+      dedupe:
+        strategy: sha256
+        fields: [issue.title]
+"#,
+        )
+        .expect_err("missing capture group should fail");
+        assert!(error.to_string().contains("capture group 1"));
     }
 }

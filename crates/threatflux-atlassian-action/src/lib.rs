@@ -546,6 +546,24 @@ rules:
         cleanup_env(&["GITHUB_OUTPUT"]);
     }
 
+    #[test]
+    #[serial]
+    fn write_outputs_writes_empty_strings_for_missing_optional_fields() {
+        let temp_root = unique_temp_dir("threatflux-atlassian-action");
+        fs::create_dir_all(&temp_root).expect("temp dir should be created");
+        let output_path = temp_root.join("github-output.txt");
+
+        std::env::set_var("GITHUB_OUTPUT", output_path.display().to_string());
+        write_outputs(&ActionOutcome::default()).expect("outputs should be written");
+        let output = fs::read_to_string(&output_path).expect("github output should exist");
+
+        assert!(output.contains("matched-rule-id="));
+        assert!(output.contains("jira-issue-key="));
+        assert!(output.contains("severity="));
+
+        cleanup_env(&["GITHUB_OUTPUT"]);
+    }
+
     fn unique_temp_dir(prefix: &str) -> PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)

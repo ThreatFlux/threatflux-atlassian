@@ -177,7 +177,7 @@ rules:
     jira:
       project_key: ${JIRA_PROJECT_KEY:-KAN}
       issue_type: Bug
-      assignee_account_id: ${JIRA_ASSIGNEE_ACCOUNT_ID}
+      assignee_account_id: ${JIRA_ASSIGNEE_ACCOUNT_ID:-}
       priority_by_severity:
         high: High
         critical: Highest
@@ -201,6 +201,12 @@ rules:
           - repository.full_name
           - issue.title
 ```
+
+Interpolation follows shell-style semantics:
+
+- use `${VAR}` for required values
+- use `${VAR:-default}` for optional values or defaults
+- `${VAR:-default}` also falls back when GitHub passes an empty string for an unset `vars.*` value
 
 ### Action inputs and outputs
 

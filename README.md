@@ -100,6 +100,9 @@ jobs:
           JIRA_ASSIGNEE_ACCOUNT_ID: ${{ vars.JIRA_ASSIGNEE_ACCOUNT_ID }}
 ```
 
+Use `${VAR}` in config for required values and `${VAR:-default}` for optional or defaulted values. That matters in GitHub
+Actions because an undefined `vars.*` reference is often surfaced to the container as an empty string.
+
 Starter files live in:
 
 - [examples/github-automation/dependabot-high.yml](examples/github-automation/dependabot-high.yml)
