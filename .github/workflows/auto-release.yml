@@ -1,6 +1,6 @@
 # ThreatFlux Auto Release Workflow
 # Automatically creates releases based on conventional commits
-# Version: 1.1.1
+# Version: 1.1.2
 
 name: Auto Release
 
@@ -234,15 +234,45 @@ jobs:
           fi
 
       - name: Commit and tag
+        id: publish_release_commit
         run: |
+          set -euo pipefail
+
           VERSION="${{ needs.check.outputs.next_version }}"
+          TARGET_SHA="${{ needs.check.outputs.target_sha }}"
+
+          git fetch origin main --no-tags
+          CURRENT_MAIN_SHA="$(git rev-parse origin/main)"
+
+          if [[ "${CURRENT_MAIN_SHA}" != "${TARGET_SHA}" ]]; then
+            echo "main advanced to ${CURRENT_MAIN_SHA}; skipping stale auto-release run for ${TARGET_SHA}"
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           git add Cargo.toml Cargo.lock
           git commit -m "chore: release v$VERSION"
           git tag -a "v$VERSION" -m "Release v$VERSION"
-          git push origin HEAD:main
+
+          if ! git push origin HEAD:main; then
+            git fetch origin main --no-tags
+            CURRENT_MAIN_SHA="$(git rev-parse origin/main)"
+
+            if [[ "${CURRENT_MAIN_SHA}" != "${TARGET_SHA}" ]]; then
+              echo "main advanced during push to ${CURRENT_MAIN_SHA}; skipping stale auto-release run"
+              echo "released=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            echo "Failed to push release commit for an unexpected reason"
+            exit 1
+          fi
+
           git push origin "v$VERSION"
+          echo "released=true" >> "$GITHUB_OUTPUT"
 
       - name: Trigger release workflow
+        if: steps.publish_release_commit.outputs.released == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
