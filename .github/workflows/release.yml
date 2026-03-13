@@ -1,6 +1,6 @@
 # ThreatFlux Release Workflow
 # Automated release with multi-platform builds
-# Version: 1.1.1
+# Version: 1.1.5
 
 name: Release
 
@@ -13,6 +13,10 @@ on:
       version:
         description: "Version to release (e.g., 1.0.0)"
         required: true
+        type: string
+      source_ref:
+        description: "Git ref to build from (defaults to the workflow ref)"
+        required: false
         type: string
       prerelease:
         description: "Is this a pre-release?"
@@ -37,12 +41,23 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
-      upload_url: ${{ steps.release.outputs.upload_url }}
+      source_ref: ${{ steps.source_ref.outputs.source_ref }}
     steps:
+      - name: Determine source ref
+        id: source_ref
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.source_ref }}" ]]; then
+            SOURCE_REF="${{ github.event.inputs.source_ref }}"
+          else
+            SOURCE_REF="${GITHUB_REF}"
+          fi
+          echo "source_ref=${SOURCE_REF}" >> "$GITHUB_OUTPUT"
+
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+          ref: ${{ steps.source_ref.outputs.source_ref }}
 
       - name: Determine version
         id: version
@@ -71,19 +86,49 @@ jobs:
             awk "/## \[$VERSION\]/,/## \[/" CHANGELOG.md | sed '1d;$d' >> release_notes.md 2>/dev/null || echo "See CHANGELOG.md for details" >> release_notes.md
           fi
 
-      - name: Create GitHub Release
-        id: release
-        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
-        with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: Release v${{ steps.version.outputs.version }}
-          body_path: release_notes.md
-          draft: false
-          prerelease: ${{ github.event.inputs.prerelease || contains(steps.version.outputs.version, '-') }}
-          generate_release_notes: true
+      - name: Create or update GitHub Release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG="v${VERSION}"
+          TITLE="Release v${VERSION}"
+          IS_PRERELEASE="false"
 
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.prerelease && 'true' || 'false' }}" == "true" ]]; then
+            IS_PRERELEASE="true"
+          fi
+
+          if [[ "${VERSION}" == *-* ]]; then
+            IS_PRERELEASE="true"
+          fi
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$TITLE" \
+              --notes-file release_notes.md
+          else
+            if [[ "${IS_PRERELEASE}" == "true" ]]; then
+              gh release create "$TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --title "$TITLE" \
+                --notes-file release_notes.md \
+                --prerelease
+            else
+              gh release create "$TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --title "$TITLE" \
+                --notes-file release_notes.md
+            fi
+          fi
+
+          RELEASE_ID="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" --jq .id)"
+          gh api \
+            --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            -F prerelease="${IS_PRERELEASE}" \
+            --silent
   # ==========================================================================
   # Build Release Artifacts
   # ==========================================================================
@@ -105,10 +150,10 @@ jobs:
             target: aarch64-unknown-linux-gnu
             artifact: linux-arm64
             use_cross: true
-          - os: macos-14
+          - os: macos-15
             target: aarch64-apple-darwin
             artifact: macos-arm64
-          - os: macos-13
+          - os: macos-15-intel
             target: x86_64-apple-darwin
             artifact: macos-amd64
           - os: windows-latest
@@ -118,6 +163,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.prepare.outputs.source_ref }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
@@ -188,6 +235,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.prepare.outputs.source_ref }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
@@ -229,11 +278,13 @@ jobs:
 
       - name: Upload to release
         run: |
-          for file in artifacts/**/*; do
-            if [ -f "$file" ]; then
-              gh release upload "v${{ needs.prepare.outputs.version }}" "$file" --clobber
-            fi
-          done
+          set -euo pipefail
+
+          while IFS= read -r -d '' file; do
+            gh release upload "v${{ needs.prepare.outputs.version }}" "$file" \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          done < <(find artifacts -type f -print0)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -248,6 +299,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.prepare.outputs.source_ref }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
@@ -256,28 +309,70 @@ jobs:
 
       - name: Check crates.io token
         id: check_token
+        env:
+          CARGO_PUBLISH_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}
         run: |
-          if [ -n "${{ secrets.CARGO_REGISTRY_TOKEN }}" ]; then
+          if [ -n "${CARGO_PUBLISH_TOKEN}" ]; then
             echo "has_token=true" >> $GITHUB_OUTPUT
           else
             echo "has_token=false" >> $GITHUB_OUTPUT
-            echo "Skipping crates.io publish - token not configured"
+            echo "Skipping crates.io publish - CARGO_REGISTRY_TOKEN / CRATES_IO_TOKEN not configured"
           fi
 
-      - name: Verify SDK publish
+      - name: Determine publish state
+        id: publish_state
         if: steps.check_token.outputs.has_token == 'true'
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          version = os.environ["RELEASE_VERSION"]
+          output_path = os.environ["GITHUB_OUTPUT"]
+          crate_outputs = {
+              "sdk_published": os.environ["SDK_PACKAGE"],
+              "cli_published": os.environ["CLI_PACKAGE"],
+          }
+
+          with open(output_path, "a", encoding="utf-8") as output:
+              for output_name, crate_name in crate_outputs.items():
+                  url = f"https://crates.io/api/v1/crates/{crate_name}"
+                  try:
+                      with urllib.request.urlopen(url, timeout=30) as response:
+                          payload = json.load(response)
+                  except urllib.error.HTTPError as exc:
+                      if exc.code != 404:
+                          raise
+                      versions = set()
+                  else:
+                      versions = {item["num"] for item in payload.get("versions", [])}
+
+                  published = version in versions
+                  print(f"{output_name}={'true' if published else 'false'}", file=output)
+                  print(
+                      f"{crate_name} {version} "
+                      f"{'already exists on crates.io' if published else 'is not published yet'}"
+                  )
+          PY
+
+      - name: Verify SDK publish
+        if: steps.check_token.outputs.has_token == 'true' && steps.publish_state.outputs.sdk_published != 'true'
         run: cargo publish -p ${{ env.SDK_PACKAGE }} --locked --dry-run
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}
 
       - name: Publish SDK to crates.io
-        if: steps.check_token.outputs.has_token == 'true'
+        if: steps.check_token.outputs.has_token == 'true' && steps.publish_state.outputs.sdk_published != 'true'
         run: cargo publish -p ${{ env.SDK_PACKAGE }} --locked
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}
 
       - name: Wait for SDK version on crates.io
-        if: steps.check_token.outputs.has_token == 'true'
+        if: steps.check_token.outputs.has_token == 'true' && steps.publish_state.outputs.cli_published != 'true'
         env:
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
@@ -317,17 +412,21 @@ jobs:
           exit 1
 
       - name: Verify CLI publish
-        if: steps.check_token.outputs.has_token == 'true'
+        if: steps.check_token.outputs.has_token == 'true' && steps.publish_state.outputs.cli_published != 'true'
         run: cargo publish -p ${{ env.CLI_PACKAGE }} --locked --dry-run
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}
 
       - name: Publish CLI to crates.io
-        if: steps.check_token.outputs.has_token == 'true'
+        if: steps.check_token.outputs.has_token == 'true' && steps.publish_state.outputs.cli_published != 'true'
         run: |
           cargo publish -p ${{ env.CLI_PACKAGE }} --locked
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}
+
+      - name: Report publish reuse
+        if: steps.check_token.outputs.has_token == 'true' && steps.publish_state.outputs.sdk_published == 'true' && steps.publish_state.outputs.cli_published == 'true'
+        run: echo "All crates for v${{ needs.prepare.outputs.version }} already exist on crates.io; skipping publish"
 
   # ==========================================================================
   # Release Success Gate

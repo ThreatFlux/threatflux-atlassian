@@ -1,8 +1,12 @@
 # ThreatFlux Auto Release Workflow
 # Automatically creates releases based on conventional commits
-# Version: 1.1.0
+# Version: 1.1.2
 
 name: Auto Release
+
+concurrency:
+  group: auto-release-${{ github.event.workflow_run.head_branch || github.ref_name || 'main' }}
+  cancel-in-progress: true
 
 on:
   workflow_run:
@@ -29,7 +33,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  actions: read
+  actions: write
 
 env:
   RUST_VERSION: 1.94.0
@@ -46,6 +50,7 @@ jobs:
       should_release: ${{ steps.check.outputs.should_release }}
       next_version: ${{ steps.version.outputs.next_version }}
       current_version: ${{ steps.version.outputs.current_version }}
+      target_sha: ${{ steps.target.outputs.sha }}
 
     steps:
       - name: Checkout
@@ -53,12 +58,23 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref_name }}
+
+      - name: Determine target SHA
+        id: target
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            echo "sha=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Check CI status
         id: ci_status
         run: |
-          CI_STATUS=$(gh run list --workflow=ci.yml --branch=main --limit=1 --json conclusion --jq '.[0].conclusion')
-          SECURITY_STATUS=$(gh run list --workflow=security.yml --branch=main --limit=1 --json conclusion --jq '.[0].conclusion')
+          TARGET_SHA="${{ steps.target.outputs.sha }}"
+          CI_STATUS=$(gh run list --workflow=ci.yml --branch=main --commit="$TARGET_SHA" --event=push --limit=1 --json conclusion --jq '.[0].conclusion // ""')
+          SECURITY_STATUS=$(gh run list --workflow=security.yml --branch=main --commit="$TARGET_SHA" --event=push --limit=1 --json conclusion --jq '.[0].conclusion // ""')
 
           if [[ "$CI_STATUS" == "success" ]] && [[ "$SECURITY_STATUS" == "success" ]]; then
             echo "all_passed=true" >> $GITHUB_OUTPUT
@@ -147,6 +163,7 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ needs.check.outputs.target_sha }}
 
       - name: Configure Git
         run: |
@@ -217,21 +234,67 @@ jobs:
           fi
 
       - name: Commit and tag
+        id: publish_release_commit
         run: |
+          set -euo pipefail
+
           VERSION="${{ needs.check.outputs.next_version }}"
+          TARGET_SHA="${{ needs.check.outputs.target_sha }}"
+
+          git fetch origin main --no-tags
+          CURRENT_MAIN_SHA="$(git rev-parse origin/main)"
+
+          if [[ "${CURRENT_MAIN_SHA}" != "${TARGET_SHA}" ]]; then
+            echo "main advanced to ${CURRENT_MAIN_SHA}; skipping stale auto-release run for ${TARGET_SHA}"
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           git add Cargo.toml Cargo.lock
           git commit -m "chore: release v$VERSION"
           git tag -a "v$VERSION" -m "Release v$VERSION"
-          git push origin main
-          git push origin "v$VERSION"
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
-        with:
-          tag_name: v${{ needs.check.outputs.next_version }}
-          name: Release v${{ needs.check.outputs.next_version }}
-          body_path: release_notes.md
-          draft: false
-          prerelease: false
+          if ! git push origin HEAD:main; then
+            git fetch origin main --no-tags
+            CURRENT_MAIN_SHA="$(git rev-parse origin/main)"
+
+            if [[ "${CURRENT_MAIN_SHA}" != "${TARGET_SHA}" ]]; then
+              echo "main advanced during push to ${CURRENT_MAIN_SHA}; skipping stale auto-release run"
+              echo "released=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            echo "Failed to push release commit for an unexpected reason"
+            exit 1
+          fi
+
+          git push origin "v$VERSION"
+          echo "released=true" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger release workflow
+        if: steps.publish_release_commit.outputs.released == 'true'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ needs.check.outputs.next_version }}"
+          RELEASE_SHA="$(git rev-parse HEAD)"
+
+          # Trigger the dedicated release pipeline from main's workflow
+          # definition while explicitly checking out the immutable release tag as
+          # the build source. This avoids tag-ref workflow drift and keeps
+          # release artifacts tied to the tagged commit.
+          gh workflow run release.yml \
+            --ref main \
+            -f version="${VERSION}" \
+            -f source_ref="v${VERSION}" \
+            -f prerelease=false
+
+          sleep 5
+          gh run list \
+            --workflow release.yml \
+            --event workflow_dispatch \
+            --commit "$RELEASE_SHA" \
+            --limit 1 \
+            --json url \
+            --jq '.[0].url // "Release workflow dispatch submitted"' \
+            || true

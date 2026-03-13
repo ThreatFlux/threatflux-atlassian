@@ -107,3 +107,5 @@ make ci
 - The container image embeds a CycloneDX SBOM at `/usr/share/doc/threatflux-atlassian/sbom.cdx.json`.
 - Release publishing verifies the SDK first, publishes it, waits for crates.io index propagation, then verifies and
   publishes the CLI.
+- GitHub Actions publishing should use a shared repo/org `CRATES_IO_TOKEN`; `CARGO_REGISTRY_TOKEN` remains supported as
+  a compatibility fallback.
