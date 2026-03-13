@@ -1,3 +1,4 @@
+use crate::rules::{is_supported_event_field_path, SUPPORTED_EVENT_NAME};
 use anyhow::Result;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -123,6 +124,15 @@ fn validate_config(config: &AutomationConfig) -> Result<()> {
             anyhow::bail!("Rule '{}' must define non-empty event and action", rule.id);
         }
 
+        if rule.when.event != SUPPORTED_EVENT_NAME {
+            anyhow::bail!(
+                "Rule '{}' has unsupported event '{}'; supported events: {}",
+                rule.id,
+                rule.when.event,
+                SUPPORTED_EVENT_NAME
+            );
+        }
+
         if rule.extract.severity.from != "issue.body" {
             anyhow::bail!(
                 "Rule '{}' has unsupported severity source '{}'",
@@ -156,6 +166,16 @@ fn validate_config(config: &AutomationConfig) -> Result<()> {
 
         if rule.jira.dedupe.fields.is_empty() {
             anyhow::bail!("Rule '{}' must define at least one dedupe field", rule.id);
+        }
+
+        for field in &rule.jira.dedupe.fields {
+            if !is_supported_event_field_path(field) {
+                anyhow::bail!(
+                    "Rule '{}' has unsupported dedupe field '{}'",
+                    rule.id,
+                    field
+                );
+            }
         }
 
         if rule.jira.dedupe.strategy != "sha256" {
@@ -522,6 +542,36 @@ rules:
     }
 
     #[test]
+    fn load_config_rejects_unsupported_event() {
+        let error = load_config_from_str(
+            r#"
+version: 1
+rules:
+  - id: test
+    when:
+      event: pull_request
+      action: opened
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(high)\b'
+    jira:
+      project_key: KAN
+      issue_type: Bug
+      priority_by_severity:
+        high: High
+      summary: test
+      description: test
+      dedupe:
+        strategy: sha256
+        fields: [issue.title]
+"#,
+        )
+        .expect_err("unsupported event should fail");
+        assert!(error.to_string().contains("unsupported event"));
+    }
+
+    #[test]
     fn load_config_rejects_empty_project_key_or_issue_type() {
         let error = load_config_from_str(
             r#"
@@ -549,6 +599,36 @@ rules:
         )
         .expect_err("empty project key should fail");
         assert!(error.to_string().contains("jira.project_key"));
+    }
+
+    #[test]
+    fn load_config_rejects_unsupported_dedupe_field() {
+        let error = load_config_from_str(
+            r#"
+version: 1
+rules:
+  - id: test
+    when:
+      event: issues
+      action: opened
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(high)\b'
+    jira:
+      project_key: KAN
+      issue_type: Bug
+      priority_by_severity:
+        high: High
+      summary: test
+      description: test
+      dedupe:
+        strategy: sha256
+        fields: [repository.name]
+"#,
+        )
+        .expect_err("unsupported dedupe field should fail");
+        assert!(error.to_string().contains("unsupported dedupe field"));
     }
 
     #[test]

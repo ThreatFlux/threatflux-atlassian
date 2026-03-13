@@ -4,6 +4,8 @@ use anyhow::Result;
 use regex::Regex;
 use sha2::{Digest, Sha256};
 
+pub(crate) const SUPPORTED_EVENT_NAME: &str = "issues";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuleMatch {
     pub rule_id: String,
@@ -13,7 +15,7 @@ pub struct RuleMatch {
 }
 
 pub fn evaluate_rule(rule: &RuleConfig, event: &GitHubIssueEvent) -> Result<Option<RuleMatch>> {
-    if rule.when.event != "issues" || rule.when.action != event.action {
+    if rule.when.event != SUPPORTED_EVENT_NAME || rule.when.action != event.action {
         return Ok(None);
     }
 
@@ -71,6 +73,17 @@ pub fn render_template(
 
     rendered.push_str(&template[last..]);
     Ok(rendered)
+}
+
+pub(crate) fn is_supported_event_field_path(path: &str) -> bool {
+    matches!(
+        path,
+        "issue.title"
+            | "issue.body"
+            | "issue.html_url"
+            | "issue.user.login"
+            | "repository.full_name"
+    )
 }
 
 pub(crate) fn resolve_event_value(path: &str, event: &GitHubIssueEvent) -> Result<String> {
