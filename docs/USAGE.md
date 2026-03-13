@@ -13,7 +13,7 @@ For a released tag:
 
 ```toml
 [dependencies]
-threatflux-atlassian-sdk = { git = "https://github.com/ThreatFlux/threatflux-atlassian.git", tag = "v0.4.0" }
+threatflux-atlassian-sdk = { git = "https://github.com/ThreatFlux/threatflux-atlassian.git", tag = "v0.4.1" }
 ```
 
 ## Direct Jira REST Usage
@@ -75,7 +75,7 @@ cargo build -p threatflux-atlassian-cli --release
 Install from a pinned repo tag:
 
 ```bash
-cargo install --git https://github.com/ThreatFlux/threatflux-atlassian.git --tag v0.4.0 threatflux-atlassian-cli
+cargo install --git https://github.com/ThreatFlux/threatflux-atlassian.git --tag v0.4.1 threatflux-atlassian-cli
 ```
 
 Typical commands:
