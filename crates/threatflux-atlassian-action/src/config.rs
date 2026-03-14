@@ -1,4 +1,4 @@
-use crate::rules::{is_supported_event_field_path, SUPPORTED_EVENT_NAME};
+use crate::rules::{is_supported_event_field_path, validate_template, SUPPORTED_EVENT_NAME};
 use anyhow::Result;
 use regex::Regex;
 use serde::de::Deserializer;
@@ -224,6 +224,15 @@ fn validate_config(config: &AutomationConfig) -> Result<()> {
                 rule.jira.dedupe.strategy
             );
         }
+
+        validate_template(
+            &format!("Rule '{}' jira.summary", rule.id),
+            &rule.jira.summary,
+        )?;
+        validate_template(
+            &format!("Rule '{}' jira.description", rule.id),
+            &rule.jira.description,
+        )?;
     }
 
     Ok(())
@@ -798,5 +807,67 @@ rules:
         )
         .expect_err("missing capture group should fail");
         assert!(error.to_string().contains("capture group 1"));
+    }
+
+    #[test]
+    fn load_config_rejects_unknown_template_field_in_summary() {
+        let error = load_config_from_str(
+            r#"
+version: 1
+rules:
+  - id: test
+    when:
+      event: issues
+      action: opened
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(high)\b'
+    jira:
+      project_key: KAN
+      issue_type: Bug
+      priority_by_severity:
+        high: High
+      summary: "{{ issue.titel }}"
+      description: test
+      dedupe:
+        strategy: sha256
+        fields: [issue.title]
+"#,
+        )
+        .expect_err("unknown template field in summary should fail");
+        assert!(error.to_string().contains("unknown template field"));
+        assert!(error.to_string().contains("issue.titel"));
+    }
+
+    #[test]
+    fn load_config_rejects_unknown_template_field_in_description() {
+        let error = load_config_from_str(
+            r#"
+version: 1
+rules:
+  - id: test
+    when:
+      event: issues
+      action: opened
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(high)\b'
+    jira:
+      project_key: KAN
+      issue_type: Bug
+      priority_by_severity:
+        high: High
+      summary: test
+      description: "{{ repo.full_name }}"
+      dedupe:
+        strategy: sha256
+        fields: [issue.title]
+"#,
+        )
+        .expect_err("unknown template field in description should fail");
+        assert!(error.to_string().contains("unknown template field"));
+        assert!(error.to_string().contains("repo.full_name"));
     }
 }

@@ -3,8 +3,12 @@ use crate::github::GitHubIssueEvent;
 use anyhow::Result;
 use regex::Regex;
 use sha2::{Digest, Sha256};
+use std::sync::LazyLock;
 
 pub(crate) const SUPPORTED_EVENT_NAME: &str = "issues";
+
+static TEMPLATE_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}").expect("valid regex"));
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuleMatch {
@@ -54,11 +58,10 @@ pub fn render_template(
     event: &GitHubIssueEvent,
     rule_match: &RuleMatch,
 ) -> Result<String> {
-    let pattern = Regex::new(r"\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}")?;
     let mut rendered = String::with_capacity(template.len());
     let mut last = 0;
 
-    for captures in pattern.captures_iter(template) {
+    for captures in TEMPLATE_PATTERN.captures_iter(template) {
         let matched = captures.get(0).expect("match should exist");
         rendered.push_str(&template[last..matched.start()]);
 
@@ -84,6 +87,24 @@ pub(crate) fn is_supported_event_field_path(path: &str) -> bool {
             | "issue.user.login"
             | "repository.full_name"
     )
+}
+
+fn is_supported_template_key(key: &str) -> bool {
+    matches!(key, "severity" | "severity_title" | "dedupe_label")
+        || is_supported_event_field_path(key)
+}
+
+pub(crate) fn validate_template(label: &str, template: &str) -> Result<()> {
+    for captures in TEMPLATE_PATTERN.captures_iter(template) {
+        let key = captures
+            .get(1)
+            .expect("template key capture should exist")
+            .as_str();
+        if !is_supported_template_key(key) {
+            anyhow::bail!("{label} references unknown template field '{key}'");
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn resolve_event_value(path: &str, event: &GitHubIssueEvent) -> Result<String> {
