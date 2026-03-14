@@ -1,0 +1,42 @@
+name: ThreatFlux Jira Automation
+description: Create or dedupe Jira issues from GitHub events using repo-local YAML config and GitHub vars/secrets.
+
+inputs:
+  config-path:
+    description: Path to the repo-local Jira automation config file.
+    required: false
+    default: .github/threatflux/jira-automation.yml
+  dry-run:
+    description: Evaluate rules and outputs without calling Jira.
+    required: false
+    default: "false"
+  log-level:
+    description: Tracing level for action logs.
+    required: false
+    default: info
+  event-name:
+    description: Optional override for the GitHub event name, mainly for tests and local debugging.
+    required: false
+  event-path:
+    description: Optional override for the GitHub event payload path, mainly for tests and local debugging.
+    required: false
+
+outputs:
+  matched-rule-id:
+    description: ID of the matched automation rule, if any.
+  created:
+    description: Whether the action created a new Jira issue.
+  jira-issue-key:
+    description: Jira issue key for the created or deduped issue, if any.
+  deduped:
+    description: Whether the action skipped creation because a matching Jira issue already existed.
+  severity:
+    description: Extracted alert severity, if any.
+
+runs:
+  using: docker
+  image: action.Dockerfile
+
+branding:
+  icon: alert-triangle
+  color: orange
