@@ -3,7 +3,7 @@ use anyhow::Result;
 use regex::Regex;
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
-use serde_yaml::Value;
+use serde_yml::Value;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -82,9 +82,9 @@ where
 }
 
 pub fn load_config_from_str(raw: &str) -> Result<AutomationConfig> {
-    let mut value: Value = serde_yaml::from_str(raw)?;
+    let mut value: Value = serde_yml::from_str(raw)?;
     expand_env_vars_in_value(&mut value)?;
-    let config: AutomationConfig = serde_yaml::from_value(value)?;
+    let config: AutomationConfig = serde_yml::from_value(value)?;
     validate_config(&config)?;
     Ok(config)
 }
