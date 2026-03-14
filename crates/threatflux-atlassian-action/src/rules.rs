@@ -3,8 +3,12 @@ use crate::github::GitHubIssueEvent;
 use anyhow::Result;
 use regex::Regex;
 use sha2::{Digest, Sha256};
+use std::sync::LazyLock;
 
 pub(crate) const SUPPORTED_EVENT_NAME: &str = "issues";
+
+static TEMPLATE_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}").expect("valid regex"));
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuleMatch {
@@ -54,11 +58,10 @@ pub fn render_template(
     event: &GitHubIssueEvent,
     rule_match: &RuleMatch,
 ) -> Result<String> {
-    let pattern = template_pattern()?;
     let mut rendered = String::with_capacity(template.len());
     let mut last = 0;
 
-    for captures in pattern.captures_iter(template) {
+    for captures in TEMPLATE_PATTERN.captures_iter(template) {
         let matched = captures.get(0).expect("match should exist");
         rendered.push_str(&template[last..matched.start()]);
 
@@ -73,23 +76,6 @@ pub fn render_template(
 
     rendered.push_str(&template[last..]);
     Ok(rendered)
-}
-
-pub(crate) fn validate_template(template: &str) -> Result<()> {
-    let pattern = template_pattern()?;
-
-    for captures in pattern.captures_iter(template) {
-        let key = captures
-            .get(1)
-            .expect("template key capture should exist")
-            .as_str();
-
-        if !is_supported_template_key(key) {
-            anyhow::bail!("Unsupported template field: {key}");
-        }
-    }
-
-    Ok(())
 }
 
 pub(crate) fn is_supported_event_field_path(path: &str) -> bool {
@@ -108,8 +94,17 @@ fn is_supported_template_key(key: &str) -> bool {
         || is_supported_event_field_path(key)
 }
 
-fn template_pattern() -> Result<Regex> {
-    Ok(Regex::new(r"\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}")?)
+pub(crate) fn validate_template(label: &str, template: &str) -> Result<()> {
+    for captures in TEMPLATE_PATTERN.captures_iter(template) {
+        let key = captures
+            .get(1)
+            .expect("template key capture should exist")
+            .as_str();
+        if !is_supported_template_key(key) {
+            anyhow::bail!("{label} references unknown template field '{key}'");
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn resolve_event_value(path: &str, event: &GitHubIssueEvent) -> Result<String> {
@@ -385,15 +380,18 @@ rules:
 
     #[test]
     fn validate_template_accepts_supported_fields() {
-        validate_template("{{ repository.full_name }} {{ severity_title }} {{ dedupe_label }}")
-            .expect("supported template fields should validate");
+        validate_template(
+            "test template",
+            "{{ repository.full_name }} {{ severity_title }} {{ dedupe_label }}",
+        )
+        .expect("supported template fields should validate");
     }
 
     #[test]
     fn validate_template_rejects_unknown_fields() {
-        let error = validate_template("{{ issue.titel }}")
+        let error = validate_template("test template", "{{ issue.titel }}")
             .expect_err("unknown template fields should fail validation");
-        assert!(error.to_string().contains("Unsupported template field"));
+        assert!(error.to_string().contains("unknown template field"));
     }
 
     #[test]

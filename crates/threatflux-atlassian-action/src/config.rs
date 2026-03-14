@@ -207,13 +207,6 @@ fn validate_config(config: &AutomationConfig) -> Result<()> {
             );
         }
 
-        validate_template(&rule.jira.summary).map_err(|error| {
-            anyhow::anyhow!("Rule '{}' has invalid jira.summary: {error}", rule.id)
-        })?;
-        validate_template(&rule.jira.description).map_err(|error| {
-            anyhow::anyhow!("Rule '{}' has invalid jira.description: {error}", rule.id)
-        })?;
-
         if rule.jira.dedupe.fields.is_empty() {
             anyhow::bail!("Rule '{}' must define at least one dedupe field", rule.id);
         }
@@ -235,6 +228,15 @@ fn validate_config(config: &AutomationConfig) -> Result<()> {
                 rule.jira.dedupe.strategy
             );
         }
+
+        validate_template(
+            &format!("Rule '{}' jira.summary", rule.id),
+            &rule.jira.summary,
+        )?;
+        validate_template(
+            &format!("Rule '{}' jira.description", rule.id),
+            &rule.jira.description,
+        )?;
     }
 
     Ok(())
@@ -778,7 +780,8 @@ rules:
 "#,
         )
         .expect_err("unknown summary template field should fail");
-        assert!(error.to_string().contains("invalid jira.summary"));
+        assert!(error.to_string().contains("jira.summary"));
+        assert!(error.to_string().contains("unknown template field"));
     }
 
     #[test]
@@ -808,7 +811,8 @@ rules:
 "#,
         )
         .expect_err("unknown description template field should fail");
-        assert!(error.to_string().contains("invalid jira.description"));
+        assert!(error.to_string().contains("jira.description"));
+        assert!(error.to_string().contains("unknown template field"));
     }
 
     #[test]
@@ -899,5 +903,67 @@ rules:
         )
         .expect_err("missing capture group should fail");
         assert!(error.to_string().contains("capture group 1"));
+    }
+
+    #[test]
+    fn load_config_rejects_unknown_template_field_in_summary() {
+        let error = load_config_from_str(
+            r#"
+version: 1
+rules:
+  - id: test
+    when:
+      event: issues
+      action: opened
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(high)\b'
+    jira:
+      project_key: KAN
+      issue_type: Bug
+      priority_by_severity:
+        high: High
+      summary: "{{ issue.titel }}"
+      description: test
+      dedupe:
+        strategy: sha256
+        fields: [issue.title]
+"#,
+        )
+        .expect_err("unknown template field in summary should fail");
+        assert!(error.to_string().contains("unknown template field"));
+        assert!(error.to_string().contains("issue.titel"));
+    }
+
+    #[test]
+    fn load_config_rejects_unknown_template_field_in_description() {
+        let error = load_config_from_str(
+            r#"
+version: 1
+rules:
+  - id: test
+    when:
+      event: issues
+      action: opened
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(high)\b'
+    jira:
+      project_key: KAN
+      issue_type: Bug
+      priority_by_severity:
+        high: High
+      summary: test
+      description: "{{ repo.full_name }}"
+      dedupe:
+        strategy: sha256
+        fields: [issue.title]
+"#,
+        )
+        .expect_err("unknown template field in description should fail");
+        assert!(error.to_string().contains("unknown template field"));
+        assert!(error.to_string().contains("repo.full_name"));
     }
 }
