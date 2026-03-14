@@ -79,7 +79,7 @@ Build a reusable GitHub Action in `threatflux-atlassian` that turns GitHub event
   - Jira field rendering and create/search orchestration through the SDK
 - `examples/github-automation/dependabot-high.yml`
   - starter config matching the current use case
-- `examples/workflows/dependabot-jira.yml`
+- `examples/workflows/dependabot-jira-issues.yml`
   - minimal consumer workflow wrapper example
 - `plans/config-driven-jira-action-plan.md`
   - this plan
@@ -162,7 +162,7 @@ rules:
         - dependabot
         - security
       dedupe:
-        strategy: sha1
+        strategy: sha256
         fields:
           - repository.full_name
           - issue.title
@@ -190,7 +190,7 @@ rules:
 ## Approach
 
 1. Add a new action crate to the workspace.
-   - Keep dependencies focused on `serde`, `serde_yaml`, `serde_json`, `regex`, `sha1` or `sha2`, and the existing SDK.
+   - Keep dependencies focused on `serde`, `serde_yml`, `serde_json`, `regex`, `sha2`, and the existing SDK.
 
 2. Define the action interface.
    - Create root `action.yml`.
