@@ -25,6 +25,9 @@ pub fn build_create_issue_request(
             )
         })?;
     let summary = render_template(&rule.jira.summary, event, rule_match)?;
+    if summary.trim().is_empty() {
+        anyhow::bail!("Rendered Jira summary cannot be empty");
+    }
     let description = render_template(&rule.jira.description, event, rule_match)?;
     let mut labels = rule.jira.labels.clone();
     if !labels.iter().any(|value| value == &rule_match.dedupe_label) {
@@ -73,8 +76,8 @@ fn escape_jql_literal(value: &str) -> String {
 mod tests {
     use super::{build_create_issue_request, build_dedupe_jql};
     use crate::config::load_config_from_str;
-    use crate::github::load_issue_event_from_str;
-    use crate::rules::evaluate_rule;
+    use crate::github::{load_issue_event_from_str, Actor, GitHubIssueEvent, Issue, Repository};
+    use crate::rules::{evaluate_rule, RuleMatch};
 
     #[test]
     fn build_create_issue_request_maps_priority_assignee_labels_and_description() {
@@ -313,6 +316,61 @@ rules:
             .expect("request should build");
 
         assert!(request.fields.assignee.is_none());
+    }
+
+    #[test]
+    fn build_create_issue_request_errors_when_rendered_summary_is_empty() {
+        let config = load_config_from_str(
+            r#"
+version: 1
+rules:
+  - id: dependabot-high-issues
+    when:
+      event: issues
+      action: opened
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(high|critical)\b'
+    jira:
+      project_key: KAN
+      issue_type: Bug
+      priority_by_severity:
+        high: High
+      summary: "{{ issue.body }}"
+      description: test
+      dedupe:
+        strategy: sha256
+        fields: [repository.full_name, issue.title]
+"#,
+        )
+        .expect("config should load");
+        let event = GitHubIssueEvent {
+            action: "opened".to_string(),
+            issue: Issue {
+                title: "Bump foo".to_string(),
+                body: Some(String::new()),
+                html_url: "https://github.com/ThreatFlux/demo/issues/1".to_string(),
+                user: Actor {
+                    login: "dependabot[bot]".to_string(),
+                },
+            },
+            repository: Repository {
+                full_name: "ThreatFlux/demo".to_string(),
+            },
+        };
+        let matched = RuleMatch {
+            rule_id: "dependabot-high-issues".to_string(),
+            severity: "high".to_string(),
+            severity_title: "High".to_string(),
+            dedupe_label: "dependabot-alert-123456789abc".to_string(),
+        };
+
+        let error = build_create_issue_request(&config.rules[0], &event, &matched)
+            .expect_err("empty rendered summary should fail");
+        assert!(error
+            .to_string()
+            .contains("Rendered Jira summary cannot be empty"));
     }
 
     #[test]

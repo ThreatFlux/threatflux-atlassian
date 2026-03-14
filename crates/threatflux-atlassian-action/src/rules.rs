@@ -54,7 +54,7 @@ pub fn render_template(
     event: &GitHubIssueEvent,
     rule_match: &RuleMatch,
 ) -> Result<String> {
-    let pattern = Regex::new(r"\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}")?;
+    let pattern = template_pattern()?;
     let mut rendered = String::with_capacity(template.len());
     let mut last = 0;
 
@@ -75,6 +75,23 @@ pub fn render_template(
     Ok(rendered)
 }
 
+pub(crate) fn validate_template(template: &str) -> Result<()> {
+    let pattern = template_pattern()?;
+
+    for captures in pattern.captures_iter(template) {
+        let key = captures
+            .get(1)
+            .expect("template key capture should exist")
+            .as_str();
+
+        if !is_supported_template_key(key) {
+            anyhow::bail!("Unsupported template field: {key}");
+        }
+    }
+
+    Ok(())
+}
+
 pub(crate) fn is_supported_event_field_path(path: &str) -> bool {
     matches!(
         path,
@@ -84,6 +101,15 @@ pub(crate) fn is_supported_event_field_path(path: &str) -> bool {
             | "issue.user.login"
             | "repository.full_name"
     )
+}
+
+fn is_supported_template_key(key: &str) -> bool {
+    matches!(key, "severity" | "severity_title" | "dedupe_label")
+        || is_supported_event_field_path(key)
+}
+
+fn template_pattern() -> Result<Regex> {
+    Ok(Regex::new(r"\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}")?)
 }
 
 pub(crate) fn resolve_event_value(path: &str, event: &GitHubIssueEvent) -> Result<String> {
@@ -138,7 +164,7 @@ fn title_case(value: &str) -> String {
 #[cfg(test)]
 #[allow(clippy::needless_raw_string_hashes)]
 mod tests {
-    use super::{evaluate_rule, render_template, title_case};
+    use super::{evaluate_rule, render_template, title_case, validate_template};
     use crate::config::load_config_from_str;
     use crate::github::load_issue_event_from_str;
 
@@ -355,6 +381,19 @@ rules:
         let error = render_template("{{ unknown.value }}", &event, &matched)
             .expect_err("unknown field should fail");
         assert!(error.to_string().contains("Unsupported event field path"));
+    }
+
+    #[test]
+    fn validate_template_accepts_supported_fields() {
+        validate_template("{{ repository.full_name }} {{ severity_title }} {{ dedupe_label }}")
+            .expect("supported template fields should validate");
+    }
+
+    #[test]
+    fn validate_template_rejects_unknown_fields() {
+        let error = validate_template("{{ issue.titel }}")
+            .expect_err("unknown template fields should fail validation");
+        assert!(error.to_string().contains("Unsupported template field"));
     }
 
     #[test]

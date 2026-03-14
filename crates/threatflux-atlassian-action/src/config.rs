@@ -1,4 +1,4 @@
-use crate::rules::{is_supported_event_field_path, SUPPORTED_EVENT_NAME};
+use crate::rules::{is_supported_event_field_path, validate_template, SUPPORTED_EVENT_NAME};
 use anyhow::Result;
 use regex::Regex;
 use serde::de::Deserializer;
@@ -195,6 +195,10 @@ fn validate_config(config: &AutomationConfig) -> Result<()> {
             );
         }
 
+        if rule.jira.summary.trim().is_empty() {
+            anyhow::bail!("Rule '{}' must define a non-empty jira.summary", rule.id);
+        }
+
         if rule.jira.description_format != "text" {
             anyhow::bail!(
                 "Rule '{}' has unsupported description format '{}'",
@@ -202,6 +206,13 @@ fn validate_config(config: &AutomationConfig) -> Result<()> {
                 rule.jira.description_format
             );
         }
+
+        validate_template(&rule.jira.summary).map_err(|error| {
+            anyhow::anyhow!("Rule '{}' has invalid jira.summary: {error}", rule.id)
+        })?;
+        validate_template(&rule.jira.description).map_err(|error| {
+            anyhow::anyhow!("Rule '{}' has invalid jira.description: {error}", rule.id)
+        })?;
 
         if rule.jira.dedupe.fields.is_empty() {
             anyhow::bail!("Rule '{}' must define at least one dedupe field", rule.id);
@@ -708,6 +719,96 @@ rules:
         )
         .expect_err("empty project key should fail");
         assert!(error.to_string().contains("jira.project_key"));
+    }
+
+    #[test]
+    fn load_config_rejects_empty_summary() {
+        let error = load_config_from_str(
+            r#"
+version: 1
+rules:
+  - id: test
+    when:
+      event: issues
+      action: opened
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(high)\b'
+    jira:
+      project_key: KAN
+      issue_type: Bug
+      priority_by_severity:
+        high: High
+      summary: "   "
+      description: test
+      dedupe:
+        strategy: sha256
+        fields: [issue.title]
+"#,
+        )
+        .expect_err("empty summary should fail");
+        assert!(error.to_string().contains("non-empty jira.summary"));
+    }
+
+    #[test]
+    fn load_config_rejects_unknown_summary_template_field() {
+        let error = load_config_from_str(
+            r#"
+version: 1
+rules:
+  - id: test
+    when:
+      event: issues
+      action: opened
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(high)\b'
+    jira:
+      project_key: KAN
+      issue_type: Bug
+      priority_by_severity:
+        high: High
+      summary: "{{ issue.titel }}"
+      description: test
+      dedupe:
+        strategy: sha256
+        fields: [issue.title]
+"#,
+        )
+        .expect_err("unknown summary template field should fail");
+        assert!(error.to_string().contains("invalid jira.summary"));
+    }
+
+    #[test]
+    fn load_config_rejects_unknown_description_template_field() {
+        let error = load_config_from_str(
+            r#"
+version: 1
+rules:
+  - id: test
+    when:
+      event: issues
+      action: opened
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(high)\b'
+    jira:
+      project_key: KAN
+      issue_type: Bug
+      priority_by_severity:
+        high: High
+      summary: test
+      description: "{{ issue.titel }}"
+      dedupe:
+        strategy: sha256
+        fields: [issue.title]
+"#,
+        )
+        .expect_err("unknown description template field should fail");
+        assert!(error.to_string().contains("invalid jira.description"));
     }
 
     #[test]
