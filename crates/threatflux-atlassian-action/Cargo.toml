@@ -1,0 +1,27 @@
+[package]
+name = "threatflux-atlassian-action"
+description = "Config-driven GitHub Action runtime for Jira automation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["jira", "atlassian", "github-actions", "automation", "threatflux"]
+categories = ["development-tools", "command-line-utilities"]
+
+[dependencies]
+anyhow.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+sha2.workspace = true
+threatflux-atlassian-sdk.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+serial_test.workspace = true

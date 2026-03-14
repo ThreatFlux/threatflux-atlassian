@@ -1,0 +1,39 @@
+version: 1
+rules:
+  - id: dependabot-high-issues
+    when:
+      event: issues
+      action: opened
+      actor_in:
+        - dependabot[bot]
+        - dependabot-preview[bot]
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(high|critical)\b'
+    jira:
+      project_key: ${JIRA_PROJECT_KEY:-KAN}
+      issue_type: Bug
+      assignee_account_id: ${JIRA_ASSIGNEE_ACCOUNT_ID:-}
+      priority_by_severity:
+        high: High
+        critical: Highest
+      summary: "[Dependabot][{{ severity_title }}] {{ issue.title }}"
+      description_format: text
+      description: |
+        {{ severity_title }}-severity Dependabot security alert.
+
+        Repository: {{ repository.full_name }}
+        GitHub Issue: {{ issue.html_url }}
+
+        ---
+        {{ issue.body }}
+      labels:
+        - dependabot
+        - security
+      dedupe:
+        strategy: sha256
+        label_prefix: dependabot-alert
+        fields:
+          - repository.full_name
+          - issue.title
