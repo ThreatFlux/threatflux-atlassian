@@ -21,7 +21,7 @@ chrono = { version = "0.4.42", features = ["serde"] }
 clap = { version = "4.5.54", features = ["derive", "env"] }
 threatflux-atlassian-sdk = { path = "crates/threatflux-atlassian-sdk", version = "0.4.2" }
 dotenvy = "0.15"
-fluxencrypt = "0.5.0"
+fluxencrypt = "0.7.2"
 rand = "0.10.0"
 reqwest = { version = "0.13.2", default-features = false, features = ["form", "json", "query", "rustls"] }
 regex = "1.12.2"
