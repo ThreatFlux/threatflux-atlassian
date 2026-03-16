@@ -34,7 +34,7 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
 
       - name: Install cargo-audit
-        uses: taiki-e/install-action@5ab5d1729c22acd8f798b267eadcfe5e5be6f5c2 # v2.68.27
+        uses: taiki-e/install-action@cbb1dcaa26e1459e2876c39f61c1e22a1258aac5 # v2.68.33
         with:
           tool: cargo-audit
 
@@ -68,7 +68,7 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
 
       - name: Install cargo-deny
-        uses: taiki-e/install-action@5ab5d1729c22acd8f798b267eadcfe5e5be6f5c2 # v2.68.27
+        uses: taiki-e/install-action@cbb1dcaa26e1459e2876c39f61c1e22a1258aac5 # v2.68.33
         with:
           tool: cargo-deny
 
@@ -134,7 +134,7 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
 
       - name: Install cargo-cyclonedx
-        uses: taiki-e/install-action@5ab5d1729c22acd8f798b267eadcfe5e5be6f5c2 # v2.68.27
+        uses: taiki-e/install-action@cbb1dcaa26e1459e2876c39f61c1e22a1258aac5 # v2.68.33
         with:
           tool: cargo-cyclonedx@0.5.8
 
