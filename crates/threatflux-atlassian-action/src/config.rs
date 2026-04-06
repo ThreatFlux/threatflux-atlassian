@@ -3,8 +3,8 @@ use anyhow::Result;
 use regex::Regex;
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
-use serde_yml::Value;
 use std::collections::BTreeMap;
+use yaml_serde::Value;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AutomationConfig {
@@ -82,9 +82,9 @@ where
 }
 
 pub fn load_config_from_str(raw: &str) -> Result<AutomationConfig> {
-    let mut value: Value = serde_yml::from_str(raw)?;
+    let mut value: Value = yaml_serde::from_str(raw)?;
     expand_env_vars_in_value(&mut value)?;
-    let config: AutomationConfig = serde_yml::from_value(value)?;
+    let config: AutomationConfig = yaml_serde::from_value(value)?;
     validate_config(&config)?;
     Ok(config)
 }
