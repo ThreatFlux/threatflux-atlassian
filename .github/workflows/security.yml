@@ -34,7 +34,7 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
 
       - name: Install cargo-audit
-        uses: taiki-e/install-action@7a562dfa955aa2e4d5b0fd6ebd57ff9715c07b0b # v2.73.0
+        uses: taiki-e/install-action@055f5df8c3f65ea01cd41e9dc855becd88953486 # v2.75.18
         with:
           tool: cargo-audit
 
@@ -46,7 +46,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload audit report
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: audit-report
           path: audit-report.json
@@ -68,7 +68,7 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
 
       - name: Install cargo-deny
-        uses: taiki-e/install-action@7a562dfa955aa2e4d5b0fd6ebd57ff9715c07b0b # v2.73.0
+        uses: taiki-e/install-action@055f5df8c3f65ea01cd41e9dc855becd88953486 # v2.75.18
         with:
           tool: cargo-deny
 
@@ -134,7 +134,7 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
 
       - name: Install cargo-cyclonedx
-        uses: taiki-e/install-action@7a562dfa955aa2e4d5b0fd6ebd57ff9715c07b0b # v2.73.0
+        uses: taiki-e/install-action@055f5df8c3f65ea01cd41e9dc855becd88953486 # v2.75.18
         with:
           tool: cargo-cyclonedx@0.5.8
 
@@ -142,7 +142,7 @@ jobs:
         run: make sbom
 
       - name: Upload SBOM
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sbom
           path: sbom/*.json
@@ -164,7 +164,7 @@ jobs:
           fetch-depth: 0
 
       - name: TruffleHog Scan
-        uses: trufflesecurity/trufflehog@6bd2d14f7a4bc1e569fa3550efa7ec632a4fa67b # v3.94.2
+        uses: trufflesecurity/trufflehog@47e7b7cd74f578e1e3145d48f669f22fd1330ca6 # v3.94.3
         with:
           extra_args: --only-verified
         continue-on-error: true
