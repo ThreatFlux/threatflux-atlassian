@@ -22,7 +22,7 @@ clap = { version = "4.6.0", features = ["derive", "env"] }
 threatflux-atlassian-sdk = { path = "crates/threatflux-atlassian-sdk", version = "0.4.2" }
 dotenvy = "0.15"
 fluxencrypt = "0.7.2"
-rand = "0.10.0"
+rand = "0.10.1"
 reqwest = { version = "0.13.2", default-features = false, features = ["form", "json", "query", "rustls"] }
 regex = "1.12.2"
 schemars = "1.2"
@@ -30,7 +30,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 yaml_serde = "0.10.4"
 serial_test = "3.3.1"
-sha2 = "0.10.9"
+sha2 = "0.11.0"
 thiserror = "2.0.17"
 tokio = { version = "1.51.0", features = ["macros", "rt-multi-thread", "sync"] }
 tokio-test = "0.4"

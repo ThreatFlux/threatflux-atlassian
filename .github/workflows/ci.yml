@@ -50,7 +50,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Cache cargo
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             ~/.cargo/registry/index
@@ -126,7 +126,7 @@ jobs:
           echo "OPENSSL_DIR=$(brew --prefix openssl@3)" >> $GITHUB_ENV
 
       - name: Cache cargo
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             ~/.cargo/registry/index
@@ -162,7 +162,7 @@ jobs:
           toolchain: ${{ env.RUST_STABLE_VERSION }}
 
       - name: Cache cargo
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             ~/.cargo/registry/index
@@ -190,12 +190,12 @@ jobs:
           toolchain: ${{ env.RUST_STABLE_VERSION }}
 
       - name: Install cargo-hack
-        uses: taiki-e/install-action@7a562dfa955aa2e4d5b0fd6ebd57ff9715c07b0b # v2.73.0
+        uses: taiki-e/install-action@055f5df8c3f65ea01cd41e9dc855becd88953486 # v2.75.18
         with:
           tool: cargo-hack
 
       - name: Cache cargo
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             ~/.cargo/registry/index
@@ -254,7 +254,7 @@ jobs:
           toolchain: ${{ env.RUST_STABLE_VERSION }}
 
       - name: Cache cargo
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             ~/.cargo/registry/index
@@ -284,12 +284,12 @@ jobs:
           components: llvm-tools-preview
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@7a562dfa955aa2e4d5b0fd6ebd57ff9715c07b0b # v2.73.0
+        uses: taiki-e/install-action@055f5df8c3f65ea01cd41e9dc855becd88953486 # v2.75.18
         with:
           tool: cargo-llvm-cov
 
       - name: Cache cargo
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             ~/.cargo/registry/index
