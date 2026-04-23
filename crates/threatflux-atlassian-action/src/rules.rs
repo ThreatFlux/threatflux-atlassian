@@ -3,6 +3,7 @@ use crate::github::GitHubIssueEvent;
 use anyhow::Result;
 use regex::Regex;
 use sha2::{Digest, Sha256};
+use std::fmt::Write as _;
 use std::sync::LazyLock;
 
 pub(crate) const SUPPORTED_EVENT_NAME: &str = "issues";
@@ -145,7 +146,10 @@ fn compute_dedupe_label(rule: &RuleConfig, event: &GitHubIssueEvent) -> Result<S
 
     let mut hasher = Sha256::new();
     hasher.update(values.join("\n").as_bytes());
-    let digest = format!("{:x}", hasher.finalize());
+    let mut digest = String::with_capacity(64);
+    for byte in hasher.finalize() {
+        write!(&mut digest, "{byte:02x}").expect("write to string");
+    }
     Ok(format!("{prefix}-{}", &digest[..12]))
 }
 
