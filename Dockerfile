@@ -12,6 +12,7 @@ ARG BUILD_DATE=unknown
 ARG VCS_REF=unknown
 ARG BINARY_NAME=tflux-atlassian
 
+USER root
 RUN apt-get update && apt-get install -y ca-certificates pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 
 # Create build user
@@ -66,6 +67,7 @@ LABEL org.opencontainers.image.title="ThreatFlux Atlassian CLI" \
       org.opencontainers.image.source="https://github.com/ThreatFlux/threatflux-atlassian"
 
 # Install runtime dependencies
+USER root
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
