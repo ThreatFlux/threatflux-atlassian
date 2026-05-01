@@ -4,7 +4,7 @@
 # =============================================================================
 # Build Stage
 # =============================================================================
-FROM ghcr.io/threatflux/rust-cicd-template:base-rust-latest AS builder
+FROM docker.io/threatflux/rust-cicd-template:base-rust-latest AS builder
 
 # Build arguments
 ARG VERSION=0.0.0
