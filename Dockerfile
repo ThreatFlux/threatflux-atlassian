@@ -16,7 +16,7 @@ USER root
 RUN apt-get update && apt-get install -y ca-certificates pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 
 # Create build user
-RUN useradd -m -u 1000 builder
+RUN id -u builder >/dev/null 2>&1 || useradd -m -u 1000 builder
 USER builder
 
 WORKDIR /build
