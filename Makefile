@@ -7,7 +7,7 @@
 # =============================================================================
 
 CARGO ?= cargo
-RUST_MSRV ?= 1.94.0
+RUST_MSRV ?= 1.95.0
 RUST_TOOLCHAIN ?= stable
 
 # Docker configuration
