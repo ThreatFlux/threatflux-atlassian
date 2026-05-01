@@ -1,6 +1,6 @@
 # ThreatFlux Jira Automation Docker action
 
-FROM rust:1.95-bookworm AS builder
+FROM docker.io/threatflux/rust-cicd-template:base-rust-latest AS builder
 
 RUN apt-get update && apt-get install -y ca-certificates pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 
