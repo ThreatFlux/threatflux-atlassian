@@ -16,7 +16,7 @@ USER root
 ENV CARGO_HOME=/usr/local/cargo \
     RUSTUP_HOME=/usr/local/rustup \
     PATH=/usr/local/cargo/bin:$PATH
-RUN apt-get update && apt-get install -y ca-certificates curl pkg-config libssl-dev && rm -rf /var/lib/apt/lists/* && \
+RUN apt-get update && apt-get install -y ca-certificates curl build-essential pkg-config libssl-dev && rm -rf /var/lib/apt/lists/* && \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
       sh -s -- -y --no-modify-path --profile minimal --default-toolchain 1.95.0 && \
     chmod -R a+w "$CARGO_HOME" "$RUSTUP_HOME"
