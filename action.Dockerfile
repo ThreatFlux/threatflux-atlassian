@@ -1,10 +1,11 @@
 # ThreatFlux Jira Automation Docker action
 
-FROM docker.io/threatflux/rust-cicd-template:base-rust-latest AS builder
+FROM ghcr.io/threatflux/rust-cicd-template:base-rust-latest AS builder
 
+USER root
 RUN apt-get update && apt-get install -y ca-certificates pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 
-RUN useradd -m -u 1000 builder
+RUN id -u builder >/dev/null 2>&1 || useradd -m builder
 USER builder
 WORKDIR /build
 
