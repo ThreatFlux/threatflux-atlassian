@@ -7,8 +7,8 @@
 # =============================================================================
 
 CARGO ?= cargo
-RUST_MSRV ?= 1.94.0
-RUST_TOOLCHAIN ?= stable
+RUST_MSRV ?= 1.96.0
+RUST_TOOLCHAIN ?= 1.96.0
 
 # Docker configuration
 DOCKER_IMAGE ?= $(shell basename $(CURDIR))
@@ -16,6 +16,7 @@ DOCKER_TAG ?= latest
 DOCKER_REGISTRY ?= ghcr.io/threatflux
 BINARY_PACKAGE ?= threatflux-atlassian-cli
 BINARY_NAME ?= tflux-atlassian
+SBOM_MANIFEST_PATH ?= crates/threatflux-atlassian-cli/Cargo.toml
 PUBLISH_PACKAGES ?= threatflux-atlassian-sdk threatflux-atlassian-cli
 
 # Coverage configuration
@@ -66,7 +67,8 @@ help: ## Display this help message
 .PHONY: dev-setup
 dev-setup: ## Install development tools
 	@echo "$(CYAN)Installing development tools...$(NC)"
-	@rustup component add rustfmt clippy llvm-tools-preview 2>/dev/null || true
+	@rustup toolchain install $(RUST_TOOLCHAIN) --profile minimal >/dev/null 2>&1 || true
+	@rustup component add rustfmt clippy llvm-tools-preview --toolchain $(RUST_TOOLCHAIN) 2>/dev/null || true
 	@cargo install cargo-llvm-cov --locked 2>/dev/null || echo "cargo-llvm-cov already installed"
 	@cargo install cargo-audit --locked 2>/dev/null || echo "cargo-audit already installed"
 	@cargo install cargo-deny --locked 2>/dev/null || echo "cargo-deny already installed"
@@ -264,7 +266,8 @@ bench-check: ## Check benchmarks compile
 .PHONY: msrv
 msrv: ## Check minimum supported Rust version
 	@echo "$(CYAN)Checking MSRV ($(RUST_MSRV))...$(NC)"
-	@rustup run $(RUST_MSRV) cargo check --all-features
+	@rustup toolchain install $(RUST_MSRV) --profile minimal >/dev/null 2>&1 || true
+	@rustup run $(RUST_MSRV) cargo check --workspace --all-features
 	@echo "$(GREEN)MSRV check passed!$(NC)"
 
 # =============================================================================
@@ -274,7 +277,11 @@ msrv: ## Check minimum supported Rust version
 .PHONY: docker-build
 docker-build: ## Build Docker image
 	@echo "$(CYAN)Building Docker image...$(NC)"
-	@docker build -t $(DOCKER_IMAGE):$(DOCKER_TAG) .
+	@docker build \
+		--build-arg BINARY_NAME=$(BINARY_NAME) \
+		--build-arg BINARY_PACKAGE=$(BINARY_PACKAGE) \
+		--build-arg SBOM_MANIFEST_PATH=$(SBOM_MANIFEST_PATH) \
+		-t $(DOCKER_IMAGE):$(DOCKER_TAG) .
 	@echo "$(GREEN)Docker image built: $(DOCKER_IMAGE):$(DOCKER_TAG)$(NC)"
 
 .PHONY: docker-push

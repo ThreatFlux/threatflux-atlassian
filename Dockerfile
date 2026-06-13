@@ -1,78 +1,67 @@
 # ThreatFlux Atlassian Dockerfile
-# Builds the `tflux-atlassian` CLI from the workspace.
+# Multi-stage build for the `tflux-atlassian` CLI.
 
-# =============================================================================
-# Build Stage
-# =============================================================================
-FROM ghcr.io/threatflux/rust-cicd-template:base-rust-latest AS builder
+FROM rust:1.96.0-bookworm AS rust-base
 
-# Build arguments
 ARG VERSION=0.0.0
 ARG BUILD_DATE=unknown
 ARG VCS_REF=unknown
 ARG BINARY_NAME=tflux-atlassian
+ARG BINARY_PACKAGE=threatflux-atlassian-cli
+ARG SBOM_MANIFEST_PATH=crates/threatflux-atlassian-cli/Cargo.toml
+ARG OCI_IMAGE_TITLE=ThreatFlux Atlassian CLI
+ARG OCI_IMAGE_DESCRIPTION=ThreatFlux Atlassian Rust workspace
+ARG OCI_IMAGE_VENDOR=ThreatFlux
+ARG OCI_IMAGE_SOURCE=https://github.com/ThreatFlux/threatflux-atlassian
 
-USER root
-ENV CARGO_HOME=/usr/local/cargo \
-    RUSTUP_HOME=/usr/local/rustup \
-    PATH=/usr/local/cargo/bin:$PATH
-RUN apt-get update && apt-get install -y ca-certificates curl build-essential pkg-config libssl-dev && rm -rf /var/lib/apt/lists/* && \
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
-      sh -s -- -y --no-modify-path --profile minimal --default-toolchain 1.95.0 && \
-    chmod -R a+w "$CARGO_HOME" "$RUSTUP_HOME"
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# Create build user
-RUN id -u builder >/dev/null 2>&1 || useradd -m builder
+FROM rust-base AS builder
+
+ARG BINARY_NAME
+ARG BINARY_PACKAGE
+ARG SBOM_MANIFEST_PATH
+
+RUN useradd -m -u 1000 builder
 USER builder
-
 WORKDIR /build
 
-COPY --chown=builder:builder Cargo.toml Cargo.lock ./
-COPY --chown=builder:builder crates/threatflux-atlassian-sdk/Cargo.toml crates/threatflux-atlassian-sdk/Cargo.toml
-COPY --chown=builder:builder crates/threatflux-atlassian-cli/Cargo.toml crates/threatflux-atlassian-cli/Cargo.toml
-COPY --chown=builder:builder crates/threatflux-atlassian-action/Cargo.toml crates/threatflux-atlassian-action/Cargo.toml
+COPY --chown=builder:builder . .
 
-RUN mkdir -p crates/threatflux-atlassian-sdk/src crates/threatflux-atlassian-cli/src crates/threatflux-atlassian-action/src && \
-    printf '%s\n' 'pub fn placeholder() {}' > crates/threatflux-atlassian-sdk/src/lib.rs && \
-    printf '%s\n' 'fn main() {}' > crates/threatflux-atlassian-cli/src/main.rs && \
-    printf '%s\n' 'fn main() {}' > crates/threatflux-atlassian-action/src/main.rs && \
-    cargo build --release -p threatflux-atlassian-cli --bin ${BINARY_NAME} --all-features || true && \
-    rm -rf crates/threatflux-atlassian-sdk/src crates/threatflux-atlassian-cli/src crates/threatflux-atlassian-action/src
-
-COPY --chown=builder:builder crates ./crates
-COPY --chown=builder:builder README.md LICENSE CONTRIBUTING.md SECURITY.md ./
-
-RUN cargo build --release -p threatflux-atlassian-cli --bin ${BINARY_NAME} --all-features
+RUN cargo build --release -p "${BINARY_PACKAGE}" --bin "${BINARY_NAME}" --all-features
 
 RUN cargo install cargo-cyclonedx --locked --version 0.5.8 && \
     cargo cyclonedx \
-      --manifest-path crates/threatflux-atlassian-cli/Cargo.toml \
+      --manifest-path "${SBOM_MANIFEST_PATH}" \
       --all-features \
       --format json \
       --spec-version 1.5 \
-      --override-filename threatflux-atlassian-cli-sbom
+      --override-filename "${BINARY_NAME}-sbom" && \
+    find /build -name "${BINARY_NAME}-sbom.json" -exec cp {} /build/sbom.cdx.json \; -quit
 
-# =============================================================================
-# Runtime Stage
-# =============================================================================
 FROM debian:bookworm-slim AS runtime
 
-# Build arguments
 ARG VERSION=0.0.0
 ARG BUILD_DATE=unknown
 ARG VCS_REF=unknown
 ARG BINARY_NAME=tflux-atlassian
+ARG OCI_IMAGE_TITLE=ThreatFlux Atlassian CLI
+ARG OCI_IMAGE_DESCRIPTION=ThreatFlux Atlassian Rust workspace
+ARG OCI_IMAGE_VENDOR=ThreatFlux
+ARG OCI_IMAGE_SOURCE=https://github.com/ThreatFlux/threatflux-atlassian
 
-# Labels
-LABEL org.opencontainers.image.title="ThreatFlux Atlassian CLI" \
-      org.opencontainers.image.description="ThreatFlux Atlassian Rust workspace" \
+LABEL org.opencontainers.image.title="${OCI_IMAGE_TITLE}" \
+      org.opencontainers.image.description="${OCI_IMAGE_DESCRIPTION}" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${VCS_REF}" \
-      org.opencontainers.image.vendor="ThreatFlux" \
-      org.opencontainers.image.source="https://github.com/ThreatFlux/threatflux-atlassian"
+      org.opencontainers.image.vendor="${OCI_IMAGE_VENDOR}" \
+      org.opencontainers.image.source="${OCI_IMAGE_SOURCE}"
 
-# Install runtime dependencies
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
@@ -81,23 +70,16 @@ RUN apt-get update && apt-get install -y \
     && mkdir -p /usr/share/doc/threatflux-atlassian \
     && useradd -m -u 1000 app
 
-# Copy binary from builder
 COPY --from=builder /build/target/release/${BINARY_NAME} /usr/local/bin/app
-COPY --from=builder /build/crates/threatflux-atlassian-cli/threatflux-atlassian-cli-sbom.json /usr/share/doc/threatflux-atlassian/sbom.cdx.json
+COPY --from=builder /build/sbom.cdx.json /usr/share/doc/threatflux-atlassian/sbom.cdx.json
 
-# Set ownership
 RUN chown -R app:app /usr/local/bin/app /usr/share/doc/threatflux-atlassian
 
-# Switch to non-root user
 USER app
 WORKDIR /home/app
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD ["/usr/local/bin/app", "--version"]
 
-# Use tini as init
 ENTRYPOINT ["/usr/bin/tini", "--"]
-
-# Default command
 CMD ["/usr/local/bin/app"]

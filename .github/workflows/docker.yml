@@ -14,6 +14,7 @@ on:
     paths:
       - ".github/workflows/docker.yml"
       - "Dockerfile"
+      - "action.Dockerfile"
       - ".dockerignore"
       - "Cargo.toml"
       - "Cargo.lock"
@@ -25,6 +26,9 @@ on:
 env:
   REGISTRY: ghcr.io
   DOCKER_BUILDKIT: 1
+  BINARY_NAME: tflux-atlassian
+  BINARY_PACKAGE: threatflux-atlassian-cli
+  SBOM_MANIFEST_PATH: crates/threatflux-atlassian-cli/Cargo.toml
 
 jobs:
   # ==========================================================================
@@ -108,7 +112,9 @@ jobs:
             VERSION=${{ github.ref_name }}
             BUILD_DATE=${{ github.event.repository.updated_at }}
             VCS_REF=${{ github.sha }}
-            BINARY_NAME=tflux-atlassian
+            BINARY_NAME=${{ env.BINARY_NAME }}
+            BINARY_PACKAGE=${{ env.BINARY_PACKAGE }}
+            SBOM_MANIFEST_PATH=${{ env.SBOM_MANIFEST_PATH }}
 
       - name: Build and push (non-PR)
         if: github.event_name != 'pull_request'
@@ -126,7 +132,9 @@ jobs:
             VERSION=${{ github.ref_name }}
             BUILD_DATE=${{ github.event.repository.updated_at }}
             VCS_REF=${{ github.sha }}
-            BINARY_NAME=tflux-atlassian
+            BINARY_NAME=${{ env.BINARY_NAME }}
+            BINARY_PACKAGE=${{ env.BINARY_PACKAGE }}
+            SBOM_MANIFEST_PATH=${{ env.SBOM_MANIFEST_PATH }}
 
       - name: Upload image artifact
         if: github.event_name == 'pull_request'
