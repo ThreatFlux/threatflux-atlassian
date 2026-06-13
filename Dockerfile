@@ -4,7 +4,7 @@
 # =============================================================================
 # Build Stage
 # =============================================================================
-FROM rust:1.95-bookworm AS builder
+FROM ghcr.io/threatflux/rust-cicd-template:base-rust-latest AS builder
 
 # Build arguments
 ARG VERSION=0.0.0
@@ -12,10 +12,17 @@ ARG BUILD_DATE=unknown
 ARG VCS_REF=unknown
 ARG BINARY_NAME=tflux-atlassian
 
-RUN apt-get update && apt-get install -y ca-certificates pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+USER root
+ENV CARGO_HOME=/usr/local/cargo \
+    RUSTUP_HOME=/usr/local/rustup \
+    PATH=/usr/local/cargo/bin:$PATH
+RUN apt-get update && apt-get install -y ca-certificates curl build-essential pkg-config libssl-dev && rm -rf /var/lib/apt/lists/* && \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+      sh -s -- -y --no-modify-path --profile minimal --default-toolchain 1.95.0 && \
+    chmod -R a+w "$CARGO_HOME" "$RUSTUP_HOME"
 
 # Create build user
-RUN useradd -m -u 1000 builder
+RUN id -u builder >/dev/null 2>&1 || useradd -m builder
 USER builder
 
 WORKDIR /build
