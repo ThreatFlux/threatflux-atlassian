@@ -2,5 +2,9 @@
 .github
 target
 **/target
-*.log
+dist
+sbom
 lcov.info
+*.log
+*.profraw
+*.profdata

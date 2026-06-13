@@ -30,7 +30,7 @@ env:
   CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
   RUSTUP_MAX_RETRIES: 10
-  RUST_STABLE_VERSION: 1.94.0
+  RUST_STABLE_VERSION: 1.96.0
 
 jobs:
   # ==========================================================================
@@ -171,7 +171,7 @@ jobs:
           key: ${{ runner.os }}-msrv-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Check MSRV
-        run: cargo check --all-features
+        run: cargo check --workspace --all-features
 
   # ==========================================================================
   # Feature Checks

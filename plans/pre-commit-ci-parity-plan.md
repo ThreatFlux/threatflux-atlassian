@@ -29,19 +29,19 @@ Developers should be able to run one command before commit and one command befor
 
 Mirror the checks from `.github/workflows/ci.yml` `quick-check`:
 
-- `cargo +1.94.0 fmt --all --check`
-- `cargo +1.94.0 clippy --all-features --all-targets -- -D warnings -D clippy::all -D clippy::pedantic -D clippy::nursery -A clippy::multiple_crate_versions -A clippy::module_name_repetitions -A clippy::missing_errors_doc -A clippy::missing_panics_doc -A clippy::must_use_candidate`
+- `cargo +1.96.0 fmt --all --check`
+- `cargo +1.96.0 clippy --all-features --all-targets -- -D warnings -D clippy::all -D clippy::pedantic -D clippy::nursery -A clippy::multiple_crate_versions -A clippy::module_name_repetitions -A clippy::missing_errors_doc -A clippy::missing_panics_doc -A clippy::must_use_candidate`
 - `actionlint`
 
 ### Slow parity
 
 Mirror the broader CI and security signal that commonly breaks PRs:
 
-- `cargo +1.94.0 test --workspace --all-features`
-- `cargo +1.94.0 test --doc --all-features`
-- `cargo +1.94.0 check --workspace --no-default-features`
-- `cargo +1.94.0 check --workspace --all-features`
-- `cargo +1.94.0 deny check licenses advisories bans sources`
+- `cargo +1.96.0 test --workspace --all-features`
+- `cargo +1.96.0 test --doc --all-features`
+- `cargo +1.96.0 check --workspace --no-default-features`
+- `cargo +1.96.0 check --workspace --all-features`
+- `cargo +1.96.0 deny check licenses advisories bans sources`
 
 ## Files To Add
 
@@ -70,8 +70,8 @@ Mirror the broader CI and security signal that commonly breaks PRs:
 Run:
 
 ```bash
-cargo +1.94.0 fmt --all --check
-cargo +1.94.0 clippy --all-features --all-targets -- \
+cargo +1.96.0 fmt --all --check
+cargo +1.96.0 clippy --all-features --all-targets -- \
   -D warnings \
   -D clippy::all \
   -D clippy::pedantic \
@@ -90,11 +90,11 @@ Run:
 
 ```bash
 make pre-commit
-cargo +1.94.0 test --workspace --all-features
-cargo +1.94.0 test --doc --all-features
-cargo +1.94.0 check --workspace --no-default-features
-cargo +1.94.0 check --workspace --all-features
-cargo +1.94.0 deny check licenses advisories bans sources
+cargo +1.96.0 test --workspace --all-features
+cargo +1.96.0 test --doc --all-features
+cargo +1.96.0 check --workspace --no-default-features
+cargo +1.96.0 check --workspace --all-features
+cargo +1.96.0 deny check licenses advisories bans sources
 ```
 
 ## Implementation Notes
