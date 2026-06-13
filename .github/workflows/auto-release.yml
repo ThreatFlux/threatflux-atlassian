@@ -114,8 +114,16 @@ jobs:
         id: version
         if: steps.check.outputs.should_release == 'true'
         run: |
-          # Get current version from Cargo.toml
-          CURRENT_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          # Use the greater of Cargo.toml and the latest semver tag so an
+          # older manifest version cannot collide with an already-published tag.
+          MANIFEST_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          LATEST_TAG_VERSION=$(
+            git tag --list 'v[0-9]*.[0-9]*.[0-9]*' |
+              sed -nE 's/^v([0-9]+)\.([0-9]+)\.([0-9]+)$/\1.\2.\3/p' |
+              sort -V |
+              tail -n1
+          )
+          CURRENT_VERSION=$(printf '%s\n' "$MANIFEST_VERSION" "$LATEST_TAG_VERSION" | sed '/^$/d' | sort -V | tail -n1)
           echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
 
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
@@ -146,7 +154,14 @@ jobs:
             patch) PATCH=$((PATCH + 1)) ;;
           esac
 
-          echo "next_version=$MAJOR.$MINOR.$PATCH" >> $GITHUB_OUTPUT
+          NEXT_VERSION="$MAJOR.$MINOR.$PATCH"
+          while git rev-parse --verify --quiet "refs/tags/v$NEXT_VERSION" >/dev/null; do
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$NEXT_VERSION"
+            PATCH=$((PATCH + 1))
+            NEXT_VERSION="$MAJOR.$MINOR.$PATCH"
+          done
+
+          echo "next_version=$NEXT_VERSION" >> $GITHUB_OUTPUT
 
   # ==========================================================================
   # Create Release
@@ -246,6 +261,12 @@ jobs:
 
           if [[ "${CURRENT_MAIN_SHA}" != "${TARGET_SHA}" ]]; then
             echo "main advanced to ${CURRENT_MAIN_SHA}; skipping stale auto-release run for ${TARGET_SHA}"
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git rev-parse --verify --quiet "refs/tags/v$VERSION" >/dev/null; then
+            echo "tag v$VERSION already exists; skipping release"
             echo "released=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
