@@ -275,12 +275,19 @@ jobs:
           git commit -m "chore: release v$VERSION"
           git tag -a "v$VERSION" -m "Release v$VERSION"
 
-          if ! git push origin HEAD:main; then
+          PUSH_LOG="$(mktemp)"
+          if ! git push origin HEAD:main 2>&1 | tee "$PUSH_LOG"; then
             git fetch origin main --no-tags
             CURRENT_MAIN_SHA="$(git rev-parse origin/main)"
 
             if [[ "${CURRENT_MAIN_SHA}" != "${TARGET_SHA}" ]]; then
               echo "main advanced during push to ${CURRENT_MAIN_SHA}; skipping stale auto-release run"
+              echo "released=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            if grep -q "Protected branch update failed" "$PUSH_LOG"; then
+              echo "main is protected by required checks; skipping direct auto-release push"
               echo "released=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
