@@ -72,13 +72,7 @@ where
     D: Deserializer<'de>,
 {
     let value = Option::<String>::deserialize(deserializer)?;
-    Ok(value.and_then(|inner| {
-        if inner.trim().is_empty() {
-            None
-        } else {
-            Some(inner)
-        }
-    }))
+    Ok(value.filter(|inner| !inner.trim().is_empty()))
 }
 
 pub fn load_config_from_str(raw: &str) -> Result<AutomationConfig> {
