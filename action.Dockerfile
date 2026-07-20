@@ -1,6 +1,6 @@
 # ThreatFlux Jira Automation Docker action
 
-FROM rust:1.96.0-bookworm AS rust-base
+FROM rust:1.97.0-bookworm AS rust-base
 
 RUN apt-get update && apt-get install -y \
     ca-certificates \

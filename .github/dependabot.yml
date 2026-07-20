@@ -27,7 +27,7 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     reviewers:
-      - "threatflux/maintainers"
+      - "wroersma"
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
