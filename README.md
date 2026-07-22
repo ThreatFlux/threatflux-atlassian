@@ -52,9 +52,11 @@ tflux-atlassian --help
 
 ### Develop locally
 
+Install `just` 1.45.0 or newer, then use the repository recipes:
+
 ```bash
-make dev-setup
-make ci
+just dev-setup
+just ci
 ```
 
 Additional usage examples live in [docs/USAGE.md](docs/USAGE.md).
@@ -122,7 +124,7 @@ threatflux-atlassian/
 ├── examples/
 ├── docs/
 ├── Cargo.toml
-├── Makefile
+├── justfile
 └── LICENSE
 ```
 
@@ -132,7 +134,7 @@ This repo keeps the standard ThreatFlux template pieces:
 
 - pinned GitHub Actions workflows
 - Rust 1.96.0 as the current pinned release/MSRV baseline
-- `Makefile`-driven local CI
+- `justfile`-driven local CI
 - release, docker, and security pipelines
 - CycloneDX SBOMs attached to GitHub releases and generated in CI
 - a runtime container SBOM embedded at `/usr/share/doc/threatflux-atlassian/sbom.cdx.json`

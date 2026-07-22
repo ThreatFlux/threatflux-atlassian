@@ -13,20 +13,22 @@ By participating in this project, you agree to maintain a respectful and inclusi
 2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/threatflux-atlassian.git`
 3. Create a branch: `git checkout -b feat/your-feature`
 4. Make your changes
-5. Run checks: `make ci`
+5. Run checks: `just ci`
 6. Push and create a Pull Request
 
 ## Development Setup
 
+Install `just` 1.45.0 or newer before running the repository recipes.
+
 ```bash
 # Install development tools
-make dev-setup
+just dev-setup
 
 # Install git hooks
-make install-hooks
+just install-hooks
 
 # Run all checks
-make ci
+just ci
 ```
 
 ## Commit Guidelines
@@ -73,9 +75,9 @@ BREAKING CHANGE: Response now returns objects instead of arrays
 
 ### PR Checklist
 
-- [ ] Code follows project style (`make fmt`)
-- [ ] All tests pass (`make test`)
-- [ ] Linting passes (`make lint`)
+- [ ] Code follows project style (`just fmt`)
+- [ ] All tests pass (`just test`)
+- [ ] Linting passes (`just lint`)
 - [ ] Documentation updated if needed
 - [ ] Commit messages follow conventions
 
@@ -100,10 +102,10 @@ cargo clippy -- -D warnings -D clippy::pedantic -D clippy::nursery
 
 ```bash
 # Run all tests
-make test
+just test
 
 # Run with coverage
-make coverage
+just coverage
 
 # Run specific test
 cargo test test_name

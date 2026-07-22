@@ -246,11 +246,11 @@ jobs:
       - name: Install cargo-cyclonedx
         uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2.83.4
         with:
-          tool: cargo-cyclonedx@0.5.8
+          tool: cargo-cyclonedx@0.5.8,just@1.45.0
 
       - name: Generate SBOM files
         run: |
-          make sbom
+          just sbom
           VERSION="${{ needs.prepare.outputs.version }}"
           mv sbom/threatflux-atlassian-sdk-sbom.json "sbom/threatflux-atlassian-sdk-v${VERSION}.cdx.json"
           mv sbom/threatflux-atlassian-cli-sbom.json "sbom/threatflux-atlassian-cli-v${VERSION}.cdx.json"
