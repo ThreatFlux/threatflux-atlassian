@@ -20,11 +20,15 @@ use fluxencrypt::{Config as FluxConfig, HybridCipher};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::{self, json};
-use threatflux_atlassian_sdk::{AtlassianClient, AtlassianConfig, CreateIssueRequest, JiraField};
+use threatflux_atlassian_sdk::{
+    AtlassianClient, AtlassianConfig, CreateIssueRequest, JiraField, UpdateIssueRequest,
+};
 use tracing::Level;
 
 /// Default maximum number of issues to return when not specified.
 const DEFAULT_ISSUE_LIMIT: u32 = 50;
+/// Default maximum number of users to return when not specified.
+const DEFAULT_USER_LIMIT: u32 = 50;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -128,6 +132,99 @@ enum Commands {
         field_id: String,
         #[arg(long, value_name = "VALUE")]
         value: String,
+    },
+    /// Update arbitrary issue fields from a JSON request body.
+    IssueUpdate {
+        #[arg(value_name = "KEY")]
+        issue: String,
+        #[arg(value_name = "PATH")]
+        request: PathBuf,
+    },
+    /// Add a standalone comment without changing issue workflow state.
+    IssueCommentAdd {
+        #[arg(value_name = "KEY")]
+        issue: String,
+        #[arg(
+            long,
+            value_name = "TEXT",
+            conflicts_with = "body_file",
+            required_unless_present = "body_file"
+        )]
+        body: Option<String>,
+        #[arg(
+            long,
+            value_name = "PATH",
+            conflicts_with = "body",
+            required_unless_present = "body"
+        )]
+        body_file: Option<PathBuf>,
+    },
+    /// List comments on an issue.
+    IssueComments {
+        #[arg(value_name = "KEY")]
+        issue: String,
+        #[arg(long, value_name = "START")]
+        start: Option<u32>,
+        #[arg(long, value_name = "LIMIT")]
+        limit: Option<u32>,
+    },
+    /// Assign an issue by account ID or unassign it.
+    IssueAssign {
+        #[arg(value_name = "KEY")]
+        issue: String,
+        #[arg(
+            long,
+            value_name = "ACCOUNT_ID",
+            conflicts_with = "unassign",
+            required_unless_present = "unassign"
+        )]
+        account_id: Option<String>,
+        #[arg(
+            long,
+            default_value_t = false,
+            conflicts_with = "account_id",
+            required_unless_present = "account_id"
+        )]
+        unassign: bool,
+    },
+    /// Search Jira users by display name, email, or supported query text.
+    UsersSearch {
+        #[arg(long, value_name = "QUERY", required = true)]
+        query: String,
+        #[arg(long, value_name = "START")]
+        start: Option<u32>,
+        #[arg(long, value_name = "LIMIT")]
+        limit: Option<u32>,
+    },
+    /// Create a link between two issues.
+    IssueLinkCreate {
+        #[arg(long, value_name = "NAME")]
+        link_type: String,
+        #[arg(long, value_name = "KEY")]
+        inward: String,
+        #[arg(long, value_name = "KEY")]
+        outward: String,
+    },
+    /// Delete an issue link by numeric link ID.
+    IssueLinkDelete {
+        #[arg(value_name = "LINK_ID")]
+        link_id: String,
+    },
+    /// Upload a file attachment to an issue.
+    IssueAttachmentAdd {
+        #[arg(value_name = "KEY")]
+        issue: String,
+        #[arg(value_name = "PATH")]
+        file: PathBuf,
+    },
+    /// Retrieve an issue changelog.
+    IssueChangelog {
+        #[arg(value_name = "KEY")]
+        issue: String,
+        #[arg(long, value_name = "START")]
+        start: Option<u32>,
+        #[arg(long, value_name = "LIMIT")]
+        limit: Option<u32>,
     },
     /// Transition an issue to a different workflow state.
     ///
@@ -337,6 +434,139 @@ async fn main() -> Result<()> {
                 "value": value,
             }))?;
         }
+        Commands::IssueUpdate { issue, request } => {
+            let payload: UpdateIssueRequest = load_json_file(&request).with_context(|| {
+                format!(
+                    "failed to load issue update request from {}",
+                    request.display()
+                )
+            })?;
+            let mut fields: Vec<String> = payload.fields.keys().cloned().collect();
+            fields.sort();
+            client
+                .update_issue(&issue, payload.fields)
+                .await
+                .with_context(|| format!("failed to update issue {issue}"))?;
+            print_json(&json!({
+                "issue": issue,
+                "action": "update_issue",
+                "fields": fields,
+            }))?;
+        }
+        Commands::IssueCommentAdd {
+            issue,
+            body,
+            body_file,
+        } => {
+            let comment = match (body, body_file) {
+                (Some(value), None) => value,
+                (None, Some(path)) => read_text_file(&path, "comment body")?,
+                _ => unreachable!("clap enforces exactly one comment body source"),
+            };
+            let comment = client
+                .add_issue_comment(&issue, &comment)
+                .await
+                .with_context(|| format!("failed to add comment to {issue}"))?;
+            print_json(&comment)?;
+        }
+        Commands::IssueComments {
+            issue,
+            start,
+            limit,
+        } => {
+            let comments = client
+                .get_issue_comments(
+                    &issue,
+                    start.unwrap_or(0),
+                    limit.unwrap_or(DEFAULT_ISSUE_LIMIT),
+                )
+                .await
+                .with_context(|| format!("failed to list comments for {issue}"))?;
+            print_json(&comments)?;
+        }
+        Commands::IssueAssign {
+            issue,
+            account_id,
+            unassign,
+        } => {
+            let account_id = if unassign {
+                None
+            } else {
+                account_id.as_deref()
+            };
+            client
+                .assign_issue(&issue, account_id)
+                .await
+                .with_context(|| format!("failed to update assignee for {issue}"))?;
+            print_json(&json!({
+                "issue": issue,
+                "action": "assign_issue",
+                "account_id": account_id,
+            }))?;
+        }
+        Commands::UsersSearch {
+            query,
+            start,
+            limit,
+        } => {
+            let users = client
+                .search_users(
+                    &query,
+                    start.unwrap_or(0),
+                    limit.unwrap_or(DEFAULT_USER_LIMIT),
+                )
+                .await
+                .with_context(|| format!("failed to search Jira users for {query}"))?;
+            print_json(&users)?;
+        }
+        Commands::IssueLinkCreate {
+            link_type,
+            inward,
+            outward,
+        } => {
+            client
+                .create_issue_link(&link_type, &inward, &outward)
+                .await
+                .with_context(|| format!("failed to link {inward} and {outward}"))?;
+            print_json(&json!({
+                "action": "create_issue_link",
+                "type": link_type,
+                "inward_issue": inward,
+                "outward_issue": outward,
+            }))?;
+        }
+        Commands::IssueLinkDelete { link_id } => {
+            client
+                .delete_issue_link(&link_id)
+                .await
+                .with_context(|| format!("failed to delete issue link {link_id}"))?;
+            print_json(&json!({
+                "action": "delete_issue_link",
+                "link_id": link_id,
+            }))?;
+        }
+        Commands::IssueAttachmentAdd { issue, file } => {
+            let attachments = client
+                .add_issue_attachment(&issue, &file)
+                .await
+                .with_context(|| format!("failed to attach {} to {issue}", file.display()))?;
+            print_json(&attachments)?;
+        }
+        Commands::IssueChangelog {
+            issue,
+            start,
+            limit,
+        } => {
+            let changelog = client
+                .get_issue_changelog(
+                    &issue,
+                    start.unwrap_or(0),
+                    limit.unwrap_or(DEFAULT_ISSUE_LIMIT),
+                )
+                .await
+                .with_context(|| format!("failed to retrieve changelog for {issue}"))?;
+            print_json(&changelog)?;
+        }
         Commands::IssueTransition {
             issue,
             status,
@@ -404,7 +634,10 @@ async fn main() -> Result<()> {
 
 fn init_tracing(verbose: bool) {
     let level = if verbose { Level::DEBUG } else { Level::INFO };
-    let _ = tracing_subscriber::fmt().with_max_level(level).try_init();
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(level)
+        .with_writer(std::io::stderr)
+        .try_init();
 }
 
 fn build_config(cli: &Cli) -> Result<AtlassianConfig> {
@@ -598,7 +831,8 @@ fn print_json<T: Serialize>(value: &T) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_comment;
+    use super::{normalize_comment, Cli, Commands};
+    use clap::Parser;
 
     #[test]
     fn normalize_comment_trims_and_keeps_content() {
@@ -610,5 +844,80 @@ mod tests {
     fn normalize_comment_filters_empty_strings() {
         assert_eq!(normalize_comment(&Some("   ".to_string())), None);
         assert_eq!(normalize_comment(&None), None);
+    }
+
+    #[test]
+    fn parses_operator_commands() {
+        let cases = [
+            vec![
+                "tflux-atlassian",
+                "issue-comment-add",
+                "KAN-1",
+                "--body",
+                "evidence",
+            ],
+            vec![
+                "tflux-atlassian",
+                "issue-comments",
+                "KAN-1",
+                "--limit",
+                "10",
+            ],
+            vec![
+                "tflux-atlassian",
+                "issue-assign",
+                "KAN-1",
+                "--account-id",
+                "account-1",
+            ],
+            vec!["tflux-atlassian", "users-search", "--query", "Allen"],
+            vec![
+                "tflux-atlassian",
+                "issue-link-create",
+                "--link-type",
+                "Blocks",
+                "--inward",
+                "KAN-1",
+                "--outward",
+                "KAN-2",
+            ],
+            vec!["tflux-atlassian", "issue-link-delete", "10001"],
+            vec![
+                "tflux-atlassian",
+                "issue-attachment-add",
+                "KAN-1",
+                "evidence.txt",
+            ],
+            vec![
+                "tflux-atlassian",
+                "issue-changelog",
+                "KAN-1",
+                "--limit",
+                "10",
+            ],
+        ];
+
+        for args in cases {
+            assert!(Cli::try_parse_from(args).is_ok());
+        }
+
+        let update =
+            Cli::try_parse_from(["tflux-atlassian", "issue-update", "KAN-1", "update.json"])
+                .unwrap();
+        assert!(matches!(update.command, Commands::IssueUpdate { .. }));
+    }
+
+    #[test]
+    fn assignment_requires_exactly_one_mode() {
+        assert!(Cli::try_parse_from(["tflux-atlassian", "issue-assign", "KAN-1"]).is_err());
+        assert!(Cli::try_parse_from([
+            "tflux-atlassian",
+            "issue-assign",
+            "KAN-1",
+            "--account-id",
+            "account-1",
+            "--unassign",
+        ])
+        .is_err());
     }
 }

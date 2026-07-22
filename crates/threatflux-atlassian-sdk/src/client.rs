@@ -10,11 +10,12 @@ use crate::types::{
     JiraIssue, JiraUser, Project, UpdateIssueRequest,
 };
 use base64::prelude::*;
-use reqwest::{Certificate, Client, ClientBuilder, Method, Response};
+use reqwest::{multipart, Certificate, Client, ClientBuilder, Method, Response};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;
+use std::path::Path;
 use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Deserialize)]
@@ -95,6 +96,47 @@ impl AtlassianClient {
         Self::new(config)
     }
 
+    fn authorization_header(&self) -> String {
+        let auth = BASE64_STANDARD.encode(format!(
+            "{}:{}",
+            self.config.username, self.config.api_token
+        ));
+        format!("Basic {auth}")
+    }
+
+    async fn ensure_success(response: Response) -> Result<Response> {
+        if response.status().is_success() {
+            return Ok(response);
+        }
+
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        error!(
+            "Jira API request failed with status {}: {}",
+            status, error_text
+        );
+
+        Err(match status.as_u16() {
+            401 => AtlassianError::auth("Invalid credentials or API token"),
+            403 => AtlassianError::PermissionDenied {
+                message: "Insufficient permissions for this operation".to_string(),
+            },
+            404 => AtlassianError::NotFound {
+                message: "Resource not found".to_string(),
+            },
+            429 => AtlassianError::RateLimit {
+                message: "Rate limit exceeded".to_string(),
+            },
+            _ => AtlassianError::jira_api(
+                format!("API request failed: {error_text}"),
+                Some(status.as_u16() as i32),
+            ),
+        })
+    }
+
     /// Make an authenticated HTTP request to the Jira API
     async fn make_request(
         &self,
@@ -110,17 +152,10 @@ impl AtlassianClient {
 
         debug!("Making {} request to: {}", method, url);
 
-        // Create basic auth header with username and API token
-        let auth = base64::prelude::BASE64_STANDARD.encode(format!(
-            "{}:{}",
-            self.config.username, self.config.api_token
-        ));
-        let auth_header = format!("Basic {auth}");
-
         let mut request = self
             .client
             .request(method, url)
-            .header("Authorization", auth_header)
+            .header("Authorization", self.authorization_header())
             .header("Content-Type", "application/json")
             .header("Accept", "application/json");
 
@@ -132,39 +167,7 @@ impl AtlassianClient {
             request = request.json(json_body);
         }
 
-        let response = request.send().await?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            error!(
-                "Jira API request failed with status {}: {}",
-                status, error_text
-            );
-
-            // Handle specific HTTP status codes
-            return Err(match status.as_u16() {
-                401 => AtlassianError::auth("Invalid credentials or API token"),
-                403 => AtlassianError::PermissionDenied {
-                    message: "Insufficient permissions for this operation".to_string(),
-                },
-                404 => AtlassianError::NotFound {
-                    message: "Resource not found".to_string(),
-                },
-                429 => AtlassianError::RateLimit {
-                    message: "Rate limit exceeded".to_string(),
-                },
-                _ => AtlassianError::jira_api(
-                    format!("API request failed: {}", error_text),
-                    Some(status.as_u16() as i32),
-                ),
-            });
-        }
-
-        Ok(response)
+        Self::ensure_success(request.send().await?).await
     }
 
     /// Get issue by key or ID
@@ -240,6 +243,170 @@ impl AtlassianClient {
                 Some(response.status().as_u16() as i32),
             ))
         }
+    }
+
+    /// Add a standalone comment to an issue without changing workflow state.
+    pub async fn add_issue_comment(&self, issue_key: &str, body: &str) -> Result<Value> {
+        let body = body.trim();
+        if body.is_empty() {
+            return Err(AtlassianError::validation("Comment body cannot be empty"));
+        }
+
+        info!("Adding comment to issue: {}", issue_key);
+        let endpoint = format!("/rest/api/2/issue/{issue_key}/comment");
+        let payload = json!({ "body": body });
+        let response = self
+            .make_request(Method::POST, &endpoint, Some(&payload), None)
+            .await?;
+        Ok(response.json().await?)
+    }
+
+    /// List comments on an issue with Jira pagination.
+    pub async fn get_issue_comments(
+        &self,
+        issue_key: &str,
+        start_at: u32,
+        max_results: u32,
+    ) -> Result<Value> {
+        info!("Listing comments for issue: {}", issue_key);
+        let endpoint = format!("/rest/api/2/issue/{issue_key}/comment");
+        let mut params = HashMap::new();
+        params.insert("startAt".to_string(), start_at.to_string());
+        params.insert("maxResults".to_string(), max_results.to_string());
+        let response = self
+            .make_request(Method::GET, &endpoint, None, Some(&params))
+            .await?;
+        Ok(response.json().await?)
+    }
+
+    /// Assign an issue by Atlassian account ID, or unassign it with `None`.
+    pub async fn assign_issue(&self, issue_key: &str, account_id: Option<&str>) -> Result<()> {
+        let account_id = account_id.map(str::trim).filter(|value| !value.is_empty());
+        info!("Updating assignee for issue: {}", issue_key);
+        let endpoint = format!("/rest/api/2/issue/{issue_key}/assignee");
+        let payload = json!({ "accountId": account_id });
+        self.make_request(Method::PUT, &endpoint, Some(&payload), None)
+            .await?;
+        Ok(())
+    }
+
+    /// Search Jira users by display name, email, or other supported query text.
+    pub async fn search_users(
+        &self,
+        query: &str,
+        start_at: u32,
+        max_results: u32,
+    ) -> Result<Vec<JiraUser>> {
+        let query = query.trim();
+        if query.is_empty() {
+            return Err(AtlassianError::validation("User query cannot be empty"));
+        }
+
+        info!("Searching Jira users");
+        let mut params = HashMap::new();
+        params.insert("query".to_string(), query.to_string());
+        params.insert("startAt".to_string(), start_at.to_string());
+        params.insert("maxResults".to_string(), max_results.to_string());
+        let response = self
+            .make_request(Method::GET, "/rest/api/2/user/search", None, Some(&params))
+            .await?;
+        Ok(response.json().await?)
+    }
+
+    /// Create an issue link between two Jira issues.
+    pub async fn create_issue_link(
+        &self,
+        link_type: &str,
+        inward_issue: &str,
+        outward_issue: &str,
+    ) -> Result<()> {
+        let link_type = link_type.trim();
+        if link_type.is_empty() {
+            return Err(AtlassianError::validation(
+                "Issue link type cannot be empty",
+            ));
+        }
+
+        info!(
+            "Creating {} link from {} to {}",
+            link_type, inward_issue, outward_issue
+        );
+        let payload = json!({
+            "type": { "name": link_type },
+            "inwardIssue": { "key": inward_issue },
+            "outwardIssue": { "key": outward_issue }
+        });
+        self.make_request(Method::POST, "/rest/api/2/issueLink", Some(&payload), None)
+            .await?;
+        Ok(())
+    }
+
+    /// Delete an issue link by numeric link ID.
+    pub async fn delete_issue_link(&self, link_id: &str) -> Result<()> {
+        let link_id = link_id.trim();
+        if link_id.is_empty() || !link_id.chars().all(|character| character.is_ascii_digit()) {
+            return Err(AtlassianError::validation(
+                "Issue link ID must contain only digits",
+            ));
+        }
+
+        info!("Deleting issue link: {}", link_id);
+        let endpoint = format!("/rest/api/2/issueLink/{link_id}");
+        self.make_request(Method::DELETE, &endpoint, None, None)
+            .await?;
+        Ok(())
+    }
+
+    /// Upload one file as an attachment to an issue.
+    pub async fn add_issue_attachment(
+        &self,
+        issue_key: &str,
+        file_path: impl AsRef<Path>,
+    ) -> Result<Value> {
+        let file_path = file_path.as_ref();
+        let file_name = file_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| AtlassianError::validation("Attachment path has no valid file name"))?;
+        let bytes = fs::read(file_path)?;
+        let part = multipart::Part::bytes(bytes).file_name(file_name.to_string());
+        let form = multipart::Form::new().part("file", part);
+        let endpoint = format!("/rest/api/2/issue/{issue_key}/attachments");
+        let url = self
+            .config
+            .base_url
+            .join(endpoint.trim_start_matches('/'))?;
+
+        info!("Uploading attachment to issue: {}", issue_key);
+        let response = self
+            .client
+            .post(url)
+            .header("Authorization", self.authorization_header())
+            .header("Accept", "application/json")
+            .header("X-Atlassian-Token", "no-check")
+            .multipart(form)
+            .send()
+            .await?;
+        let response = Self::ensure_success(response).await?;
+        Ok(response.json().await?)
+    }
+
+    /// Retrieve an issue's changelog with Jira pagination.
+    pub async fn get_issue_changelog(
+        &self,
+        issue_key: &str,
+        start_at: u32,
+        max_results: u32,
+    ) -> Result<Value> {
+        info!("Getting changelog for issue: {}", issue_key);
+        let endpoint = format!("/rest/api/2/issue/{issue_key}/changelog");
+        let mut params = HashMap::new();
+        params.insert("startAt".to_string(), start_at.to_string());
+        params.insert("maxResults".to_string(), max_results.to_string());
+        let response = self
+            .make_request(Method::GET, &endpoint, None, Some(&params))
+            .await?;
+        Ok(response.json().await?)
     }
 
     /// Create a new issue
@@ -755,7 +922,7 @@ mod tests {
     use super::*;
     use crate::types::{CreateIssueFields, IssueTypeReference, ProjectReference};
     use std::time::Duration;
-    use wiremock::matchers::{method, path};
+    use wiremock::matchers::{body_json, body_string_contains, header, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn create_test_config() -> AtlassianConfig {
@@ -765,6 +932,17 @@ mod tests {
             "test-token".to_string(),
         )
         .unwrap()
+    }
+
+    fn create_mock_client(server: &MockServer) -> AtlassianClient {
+        let config = AtlassianConfig::builder()
+            .base_url(server.uri())
+            .username("test@example.com")
+            .api_token("test-token")
+            .verify_ssl(false)
+            .build()
+            .unwrap();
+        AtlassianClient::new(config).unwrap()
     }
 
     #[test]
@@ -905,5 +1083,206 @@ mod tests {
 
         assert_eq!(created_issue.key, "TEST-123");
         assert_eq!(created_issue.fields.summary, "Created issue");
+    }
+
+    #[tokio::test]
+    async fn test_comment_and_assignment_requests() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/rest/api/2/issue/TEST-123/comment"))
+            .and(body_json(json!({ "body": "Review evidence" })))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+                "id": "10001",
+                "body": "Review evidence"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/rest/api/2/issue/TEST-123/comment"))
+            .and(query_param("startAt", "5"))
+            .and(query_param("maxResults", "10"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "startAt": 5,
+                "maxResults": 10,
+                "total": 0,
+                "comments": []
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/rest/api/2/issue/TEST-123/assignee"))
+            .and(body_json(json!({ "accountId": "account-123" })))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/rest/api/2/issue/TEST-123/assignee"))
+            .and(body_json(json!({ "accountId": null })))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/rest/api/2/issue/TEST-123"))
+            .and(body_json(json!({
+                "fields": {
+                    "summary": "Updated summary",
+                    "labels": ["reviewed"]
+                }
+            })))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = create_mock_client(&server);
+        let comment = client
+            .add_issue_comment("TEST-123", "  Review evidence  ")
+            .await
+            .unwrap();
+        let comments = client.get_issue_comments("TEST-123", 5, 10).await.unwrap();
+        client
+            .assign_issue("TEST-123", Some("account-123"))
+            .await
+            .unwrap();
+        client.assign_issue("TEST-123", None).await.unwrap();
+        client
+            .update_issue(
+                "TEST-123",
+                HashMap::from([
+                    (
+                        "summary".to_string(),
+                        Value::String("Updated summary".to_string()),
+                    ),
+                    ("labels".to_string(), json!(["reviewed"])),
+                ]),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(comment["id"], "10001");
+        assert_eq!(comments["startAt"], 5);
+    }
+
+    #[tokio::test]
+    async fn test_user_search_and_changelog_requests() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/rest/api/2/user/search"))
+            .and(query_param("query", "Allen"))
+            .and(query_param("startAt", "0"))
+            .and(query_param("maxResults", "25"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
+                "accountId": "account-123",
+                "displayName": "Allen Example",
+                "active": true
+            }])))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/rest/api/2/issue/TEST-123/changelog"))
+            .and(query_param("startAt", "1"))
+            .and(query_param("maxResults", "2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "startAt": 1,
+                "maxResults": 2,
+                "total": 1,
+                "values": []
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = create_mock_client(&server);
+        let users = client.search_users(" Allen ", 0, 25).await.unwrap();
+        let changelog = client.get_issue_changelog("TEST-123", 1, 2).await.unwrap();
+
+        assert_eq!(users[0].account_id.as_deref(), Some("account-123"));
+        assert_eq!(changelog["maxResults"], 2);
+    }
+
+    #[tokio::test]
+    async fn test_issue_link_requests() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/rest/api/2/issueLink"))
+            .and(body_json(json!({
+                "type": { "name": "Blocks" },
+                "inwardIssue": { "key": "TEST-123" },
+                "outwardIssue": { "key": "TEST-456" }
+            })))
+            .respond_with(ResponseTemplate::new(201))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("DELETE"))
+            .and(path("/rest/api/2/issueLink/10001"))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = create_mock_client(&server);
+        client
+            .create_issue_link("Blocks", "TEST-123", "TEST-456")
+            .await
+            .unwrap();
+        client.delete_issue_link("10001").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_attachment_upload_request() {
+        let server = MockServer::start().await;
+        let attachment_path = std::env::temp_dir().join(format!(
+            "threatflux-atlassian-attachment-{}.txt",
+            std::process::id()
+        ));
+        fs::write(&attachment_path, b"review evidence").unwrap();
+
+        Mock::given(method("POST"))
+            .and(path("/rest/api/2/issue/TEST-123/attachments"))
+            .and(header("x-atlassian-token", "no-check"))
+            .and(body_string_contains("review evidence"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
+                "id": "10001",
+                "filename": attachment_path.file_name().unwrap().to_string_lossy()
+            }])))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = create_mock_client(&server);
+        let response = client
+            .add_issue_attachment("TEST-123", &attachment_path)
+            .await
+            .unwrap();
+        fs::remove_file(&attachment_path).unwrap();
+
+        assert_eq!(response[0]["id"], "10001");
+    }
+
+    #[tokio::test]
+    async fn test_operator_input_validation() {
+        let client = AtlassianClient::new(create_test_config()).unwrap();
+
+        assert!(matches!(
+            client.add_issue_comment("TEST-123", "  ").await,
+            Err(AtlassianError::Validation { .. })
+        ));
+        assert!(matches!(
+            client.search_users("", 0, 10).await,
+            Err(AtlassianError::Validation { .. })
+        ));
+        assert!(matches!(
+            client.delete_issue_link("not-a-number").await,
+            Err(AtlassianError::Validation { .. })
+        ));
     }
 }

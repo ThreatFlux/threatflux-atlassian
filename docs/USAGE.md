@@ -84,8 +84,21 @@ Typical commands:
 tflux-atlassian profile
 tflux-atlassian issue-get KAN-123
 tflux-atlassian issue-search --jql "project = KAN ORDER BY created DESC" --limit 10
+tflux-atlassian issue-comment-add KAN-123 --body-file ./review.md
+tflux-atlassian issue-comments KAN-123 --limit 25
+tflux-atlassian users-search --query "Example User"
+tflux-atlassian issue-assign KAN-123 --account-id ACCOUNT_ID
+tflux-atlassian issue-update KAN-123 ./update.json
+tflux-atlassian issue-link-create --link-type Blocks --inward KAN-123 --outward KAN-456
+tflux-atlassian issue-attachment-add KAN-123 ./evidence.txt
+tflux-atlassian issue-changelog KAN-123 --limit 25
 tflux-atlassian issue-transition KAN-123 --status "In Progress"
 ```
+
+The standalone comment command does not transition the issue. Use `issue-update`
+with a JSON body containing a `fields` object for general edits such as summary,
+description, priority, labels, parent, or assignee. Use `issue-link-delete LINK_ID`
+and `issue-assign KEY --unassign` for their corresponding removal operations.
 
 ## Local Development
 
