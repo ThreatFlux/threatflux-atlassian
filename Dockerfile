@@ -1,7 +1,7 @@
 # ThreatFlux Atlassian Dockerfile
 # Multi-stage build for the `tflux-atlassian` CLI.
 
-FROM rust:1.97.0-bookworm AS rust-base
+FROM rust:1.97.1-bookworm AS rust-base
 
 ARG VERSION=0.0.0
 ARG BUILD_DATE=unknown
