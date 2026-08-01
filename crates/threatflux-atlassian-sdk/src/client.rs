@@ -16,6 +16,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use tokio::fs as tokio_fs;
 use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Deserialize)]
@@ -368,7 +369,7 @@ impl AtlassianClient {
             .file_name()
             .and_then(|name| name.to_str())
             .ok_or_else(|| AtlassianError::validation("Attachment path has no valid file name"))?;
-        let bytes = fs::read(file_path)?;
+        let bytes = tokio_fs::read(file_path).await?;
         let part = multipart::Part::bytes(bytes).file_name(file_name.to_string());
         let form = multipart::Form::new().part("file", part);
         let endpoint = format!("/rest/api/2/issue/{issue_key}/attachments");

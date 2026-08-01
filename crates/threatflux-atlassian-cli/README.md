@@ -96,7 +96,7 @@ cargo build -p threatflux-atlassian-cli --release
 
 All successful command outputs are emitted as JSON.
 
-`issue-update` accepts the same shape as Jira's update request:
+`issue-update` accepts a fields-only update payload:
 
 ```json
 {
