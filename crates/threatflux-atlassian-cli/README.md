@@ -18,7 +18,11 @@ The CLI currently focuses on direct Jira REST workflows built on top of the shar
 - Get/search issues and list project issues via JQL
 - List/find Jira fields
 - Create issues from JSON payloads
-- Update story points or arbitrary custom fields
+- Update arbitrary issue fields, story points, or custom fields
+- Add and list issue comments without changing workflow state
+- Assign or unassign existing issues and search Jira users
+- Create/delete issue links and inspect issue changelogs
+- Upload issue attachments
 - Transition issues by status name or transition ID
 - Generate FluxEncrypt-compatible RSA key pairs
 - Encrypt Jira/API credentials for env-file workflows
@@ -61,6 +65,25 @@ cargo build -p threatflux-atlassian-cli --release
 # Transition issue by status
 ./target/release/tflux-atlassian issue-transition SEC-123 --status "In Progress"
 
+# Add a standalone comment without transitioning the issue
+./target/release/tflux-atlassian issue-comment-add SEC-123 --body-file ./review.md
+
+# Find a Jira account and assign an existing issue
+./target/release/tflux-atlassian users-search --query "Example User"
+./target/release/tflux-atlassian issue-assign SEC-123 --account-id ACCOUNT_ID
+
+# Update standard or custom fields from a typed update request
+./target/release/tflux-atlassian issue-update SEC-123 ./update.json
+
+# Read comments and changelog with pagination
+./target/release/tflux-atlassian issue-comments SEC-123 --limit 25
+./target/release/tflux-atlassian issue-changelog SEC-123 --limit 25
+
+# Link issues and attach validation evidence
+./target/release/tflux-atlassian issue-link-create \
+  --link-type Blocks --inward SEC-123 --outward SEC-456
+./target/release/tflux-atlassian issue-attachment-add SEC-123 ./evidence.txt
+
 # Generate key material
 ./target/release/tflux-atlassian keygen --private-out ./jira.private.pem --public-out ./jira.public.pem
 
@@ -72,6 +95,19 @@ cargo build -p threatflux-atlassian-cli --release
 ```
 
 All successful command outputs are emitted as JSON.
+
+`issue-update` accepts a fields-only update payload:
+
+```json
+{
+  "fields": {
+    "summary": "Updated summary",
+    "priority": { "name": "High" },
+    "labels": ["automation", "reviewed"],
+    "assignee": { "accountId": "ACCOUNT_ID" }
+  }
+}
+```
 
 ## Crate Layout
 
