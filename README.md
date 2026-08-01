@@ -133,7 +133,7 @@ threatflux-atlassian/
 This repo keeps the standard ThreatFlux template pieces:
 
 - pinned GitHub Actions workflows
-- Rust 1.96.0 as the current pinned release/MSRV baseline
+- Rust 1.97.1 as the current pinned stable toolchain, with Rust 1.96.0 retained as the MSRV
 - `justfile`-driven local CI
 - release, docker, and security pipelines
 - CycloneDX SBOMs attached to GitHub releases and generated in CI

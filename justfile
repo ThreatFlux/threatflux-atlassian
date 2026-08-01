@@ -2,7 +2,7 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
 cargo := env_var_or_default("CARGO", "cargo")
 rust_msrv := env_var_or_default("RUST_MSRV", "1.96.0")
-rust_toolchain := env_var_or_default("RUST_TOOLCHAIN", "1.96.0")
+rust_toolchain := env_var_or_default("RUST_TOOLCHAIN", "1.97.1")
 docker_image := env_var_or_default("DOCKER_IMAGE", "threatflux-atlassian")
 docker_tag := env_var_or_default("DOCKER_TAG", "latest")
 docker_registry := env_var_or_default("DOCKER_REGISTRY", "ghcr.io/threatflux")
