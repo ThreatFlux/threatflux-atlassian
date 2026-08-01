@@ -142,10 +142,10 @@ jobs:
       - name: Install cargo-cyclonedx
         uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2.83.4
         with:
-          tool: cargo-cyclonedx@0.5.8
+          tool: cargo-cyclonedx@0.5.8,just@1.45.0
 
       - name: Generate SBOM
-        run: make sbom
+        run: just sbom
 
       - name: Upload SBOM
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
