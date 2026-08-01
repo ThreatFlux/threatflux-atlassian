@@ -18,13 +18,13 @@ help:
 # Install development tools.
 dev-setup:
     @echo "Installing development tools..."
-    @rustup toolchain install {{ rust_toolchain }} --profile minimal >/dev/null 2>&1 || true
-    @rustup component add rustfmt clippy llvm-tools-preview --toolchain {{ rust_toolchain }} 2>/dev/null || true
-    @cargo install cargo-llvm-cov --locked 2>/dev/null || echo "cargo-llvm-cov already installed"
-    @cargo install cargo-audit --locked 2>/dev/null || echo "cargo-audit already installed"
-    @cargo install cargo-deny --locked 2>/dev/null || echo "cargo-deny already installed"
-    @cargo install cargo-cyclonedx --locked 2>/dev/null || echo "cargo-cyclonedx already installed"
-    @cargo install cargo-hack --locked 2>/dev/null || echo "cargo-hack already installed"
+    @rustup toolchain install {{ rust_toolchain }} --profile minimal
+    @rustup component add rustfmt clippy llvm-tools-preview --toolchain {{ rust_toolchain }}
+    @{{ cargo }} install cargo-llvm-cov --locked
+    @{{ cargo }} install cargo-audit --locked
+    @{{ cargo }} install cargo-deny --locked
+    @{{ cargo }} install cargo-cyclonedx --locked
+    @{{ cargo }} install cargo-hack --locked
     @echo "Development tools installed!"
 
 # Install the Git pre-commit hook.
