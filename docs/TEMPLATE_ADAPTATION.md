@@ -25,7 +25,7 @@ workspace for Atlassian integrations.
    - workspace-aware Cargo commands
    - CLI-specific binary packaging
    - ordered crates.io publish steps with index propagation handling
-4. The root [Makefile](../Makefile) was updated so local CI commands operate on the workspace rather than a single
+4. The root [justfile](../justfile) was updated so local CI commands operate on the workspace rather than a single
    package.
 5. Repo-specific documentation was added in [README.md](../README.md) and [USAGE.md](./USAGE.md).
 
