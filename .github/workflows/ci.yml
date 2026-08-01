@@ -30,7 +30,8 @@ env:
   CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
   RUSTUP_MAX_RETRIES: 10
-  RUST_STABLE_VERSION: 1.96.0
+  RUST_STABLE_VERSION: 1.97.1
+  RUST_MSRV_VERSION: 1.96.0
 
 jobs:
   # ==========================================================================
@@ -165,7 +166,7 @@ jobs:
       - name: Install MSRV toolchain
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
-          toolchain: ${{ env.RUST_STABLE_VERSION }}
+          toolchain: ${{ env.RUST_MSRV_VERSION }}
 
       - name: Cache cargo
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -177,7 +178,7 @@ jobs:
           key: ${{ runner.os }}-msrv-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Check MSRV
-        run: cargo check --workspace --all-features
+        run: cargo +${{ env.RUST_MSRV_VERSION }} check --workspace --all-features
 
   # ==========================================================================
   # Feature Checks
