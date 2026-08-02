@@ -2,10 +2,14 @@
 
 ## Supported Versions
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 0.4.x   | :white_check_mark: |
-| < 0.4   | :x:                |
+| Release line | Status |
+| --- | --- |
+| Latest published release | Supported |
+| `main` | Development; fixes target the next release |
+| Older releases | Unsupported |
+
+Upgrade to the latest published release before requesting a backport. Security fixes ordinarily land on `main` and in
+the next release; maintainers will announce any exceptional older-line support explicitly.
 
 ## Reporting a Vulnerability
 
@@ -59,7 +63,7 @@ We consider security research conducted in good faith to be authorized. We will 
 
 - Static analysis with Clippy (pedantic + nursery)
 - Automated workspace, documentation, and feature checks
-- Code review required for all changes
+- Contributor and maintainer review is expected before changes are merged
 
 ### CI/CD Security
 

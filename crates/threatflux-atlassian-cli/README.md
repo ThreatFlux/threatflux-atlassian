@@ -14,10 +14,17 @@ environment management.
 
 The CLI currently focuses on direct Jira REST workflows built on top of the shared SDK.
 
+> [!WARNING]
+> `issue-search` and `project-issues` use upstream-deprecated `GET /rest/api/2/search`; `projects-list` uses deprecated
+> `GET /rest/api/2/project`. Treat these commands as compatibility tools, not foundations for new automation. Atlassian
+> documents enhanced search at `/rest/api/2/search/jql` and paginated project search at `/rest/api/2/project/search`.
+> See the official [issue-search reference](https://developer.atlassian.com/cloud/jira/platform/rest/v2/api-group-issue-search/)
+> and [project deprecation notice](https://developer.atlassian.com/cloud/jira/platform/deprecation-notice-removal-of-get-filters-and-get-all-projects/).
+
 ## Key Capabilities
 
 - Fetch profile + API health
-- Get/search issues and list project issues via JQL
+- Get issues; retained legacy commands search issues and list project issues via JQL
 - List/find Jira fields
 - Create issues from JSON payloads
 - Update arbitrary issue fields, story points, or custom fields
@@ -76,7 +83,7 @@ cargo build -p threatflux-atlassian-cli --release
 # Show authenticated Jira user profile
 ./target/release/tflux-atlassian profile
 
-# Search issues
+# Legacy issue search command; use Atlassian's enhanced search endpoint for new integrations
 ./target/release/tflux-atlassian issue-search --jql "project = SEC ORDER BY created DESC" --limit 25
 
 # Get one issue

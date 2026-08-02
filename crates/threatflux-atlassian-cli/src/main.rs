@@ -75,7 +75,7 @@ enum Commands {
         #[arg(value_name = "KEY")]
         issue: String,
     },
-    /// Search for issues using a JQL query string.
+    /// Compatibility search using upstream-deprecated GET /rest/api/2/search.
     IssueSearch {
         #[arg(long, value_name = "JQL", required = true)]
         jql: String,
@@ -84,14 +84,14 @@ enum Commands {
         #[arg(long, value_name = "LIMIT")]
         limit: Option<u32>,
     },
-    /// List all projects accessible to the user.
+    /// Compatibility project list using deprecated GET /rest/api/2/project.
     ProjectsList,
     /// Retrieve a specific project by key or ID.
     ProjectGet {
         #[arg(value_name = "KEY_OR_ID")]
         project: String,
     },
-    /// Search for issues within a project.
+    /// Compatibility project search using deprecated GET /rest/api/2/search.
     ProjectIssues {
         #[arg(value_name = "KEY")]
         project: String,

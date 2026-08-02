@@ -58,6 +58,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+### Legacy search and project-list helpers
+
+`search_issues` and `get_project_issues` call `GET /rest/api/2/search`, which Atlassian marks as currently being
+removed. `get_projects` calls deprecated, non-paginated `GET /rest/api/2/project`. They are retained for compatibility,
+not recommended for new integrations. Atlassian's replacements are enhanced `/rest/api/2/search/jql` and paginated
+`/rest/api/2/project/search`; this SDK does not yet model their current response and pagination types. See the official
+[issue-search reference](https://developer.atlassian.com/cloud/jira/platform/rest/v2/api-group-issue-search/) and
+[project deprecation notice](https://developer.atlassian.com/cloud/jira/platform/deprecation-notice-removal-of-get-filters-and-get-all-projects/).
+
 ## Legacy Remote MCP API
 
 > [!WARNING]
@@ -106,6 +115,9 @@ tflux-atlassian issue-changelog KAN-123 --limit 25
 tflux-atlassian issue-transition KAN-123 --status "In Progress"
 ```
 
+`issue-search` and `project-issues` use the legacy issue-search route; `projects-list` uses the legacy project-list
+route. Keep those commands out of new automation until they are backed by Atlassian's current endpoints.
+
 The standalone comment command does not transition the issue. Use `issue-update`
 with a JSON body containing a `fields` object for general edits such as summary,
 description, priority, labels, parent, or assignee. Use `issue-link-delete LINK_ID`
@@ -140,6 +152,9 @@ just ci
 ## GitHub Action Usage
 
 The shared action is intended for thin per-repo workflows and a committed config file.
+
+Its deduplication step currently uses the legacy issue-search route described above and inherits that endpoint's
+removal risk. Issue creation uses the supported direct issue endpoint.
 
 ### Required GitHub variables and secrets
 

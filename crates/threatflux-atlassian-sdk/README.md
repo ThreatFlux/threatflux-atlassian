@@ -22,9 +22,9 @@ environment-driven configuration, and helpers used by the ThreatFlux Atlassian C
 ## Features
 
 - Focused Jira issue create, read, and field-update operations
-- JQL search and pagination inputs
+- Legacy JQL search and pagination inputs through an upstream-deprecated route
 - Comments, assignees, issue links, attachments, and changelogs
-- Projects, users, fields, custom fields, and workflow transitions
+- Individual project lookup, a legacy non-paginated project list, users, fields, custom fields, and workflow transitions
 - API-token Basic authentication for Jira Cloud scripts and automation
 - rustls transport with certificate verification by default and an optional custom trust root
 - Plain or FluxEncrypt-compatible encrypted environment inputs
@@ -82,13 +82,13 @@ when designing a distributable integration.
 
 | Area | Methods |
 | --- | --- |
-| Issues | `get_issue`, `create_issue`, `update_issue`, `get_project_issues` |
-| Search | `search_issues` with JQL, `search_users` |
+| Issues | `get_issue`, `create_issue`, `update_issue`; `get_project_issues` uses the legacy issue-search route |
+| Search | `search_issues` uses an upstream-deprecated route; `search_users` |
 | Comments and history | `add_issue_comment`, `get_issue_comments`, `get_issue_changelog` |
 | Assignment and links | `assign_issue`, `create_issue_link`, `delete_issue_link` |
 | Attachments | `add_issue_attachment` (one file per call) |
 | Workflow | `get_issue_transitions`, `transition_issue`, `transition_issue_by_name` |
-| Projects and identity | `get_projects`, `get_project`, `get_myself` |
+| Projects and identity | `get_project`, `get_myself`; `get_projects` uses the legacy non-paginated route |
 | Fields | `get_fields`, `find_custom_field_id`, `update_custom_field`, `update_story_points` |
 | Connectivity | `health_check` (calls the current-user endpoint) |
 
@@ -96,6 +96,20 @@ The methods use `/rest/api/2`. Operation availability and returned fields still 
 configuration, issue type, field schema, and authenticated account permissions. Consult the
 [Jira Cloud REST API v2 reference](https://developer.atlassian.com/cloud/jira/platform/rest/v2/intro/) for server-side
 behavior.
+
+### Legacy endpoint compatibility
+
+> [!WARNING]
+> `search_issues` and `get_project_issues` call `GET /rest/api/2/search`, which Atlassian marks as currently being
+> removed. `get_projects` calls deprecated `GET /rest/api/2/project` rather than paginated project search. The methods
+> remain public for compatibility, but new integrations should not depend on them.
+
+Atlassian documents enhanced issue search at `GET` or `POST /rest/api/2/search/jql` and paginated project search at
+`GET /rest/api/2/project/search`. This crate does not yet model the replacements' current pagination and response types.
+Use an implementation of the current endpoints for new work and track equivalent SDK implementation before migration.
+See Atlassian's [issue-search reference](https://developer.atlassian.com/cloud/jira/platform/rest/v2/api-group-issue-search/)
+and [project endpoint deprecation notice](https://developer.atlassian.com/cloud/jira/platform/deprecation-notice-removal-of-get-filters-and-get-all-projects/).
+The other direct operations in the table remain the supported SDK path.
 
 ## Configuration
 
@@ -176,8 +190,8 @@ legacy API shape and stops before making an MCP request.
 | Example | Purpose | Makes remote changes? |
 | --- | --- | --- |
 | [`quickstart.rs`](examples/quickstart.rs) | Fetch one Jira issue from environment config | No |
-| [`jira_example.rs`](examples/jira_example.rs) | Explore direct client reads and construct a create request | Reads Jira; does not create the sample issue |
-| [`ticket_management.rs`](examples/ticket_management.rs) | Demonstrate direct ticket and custom-field workflows | Performs reads; review before adapting |
+| [`jira_example.rs`](examples/jira_example.rs) | Explore direct reads, including retained legacy list/search helpers, and construct a create request | Reads Jira; does not create the sample issue |
+| [`ticket_management.rs`](examples/ticket_management.rs) | Demonstrate ticket/custom-field workflows and retained legacy JQL search | Performs reads; review before adapting |
 | [`remote_mcp_example.rs`](examples/remote_mcp_example.rs) | Show the retained legacy OAuth API shape and migration warning | No MCP request |
 
 ## Security

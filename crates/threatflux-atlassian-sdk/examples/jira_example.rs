@@ -52,8 +52,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => println!("❌ Error getting user info: {e}"),
     }
 
-    // Example 3: Get available projects
-    println!("\n3. Getting accessible projects...");
+    // Compatibility example only: this helper uses deprecated GET /rest/api/2/project.
+    println!("\n3. Legacy project listing (not recommended for new integrations)...");
+    println!("⚠️  Use paginated GET /rest/api/2/project/search in new implementation work.");
     match client.get_projects().await {
         Ok(projects) => {
             println!("✅ Found {} projects:", projects.len());
@@ -83,8 +84,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Example 5: Search for issues in a project (like Python JQL queries)
-    println!("\n5. Searching for recent issues...");
+    // Compatibility example only: search_issues uses GET /rest/api/2/search,
+    // which Atlassian marks as currently being removed.
+    println!("\n5. Legacy JQL search (not recommended for new integrations)...");
+    println!("⚠️  Use enhanced GET or POST /rest/api/2/search/jql in new implementation work.");
     let jql = "created >= -7d ORDER BY created DESC";
     match client.search_issues(jql, 0, 5).await {
         Ok(results) => {
@@ -101,7 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Example 6: Get specific issue (like Python get_issue)
     println!("\n6. Getting specific issue details...");
-    // Use the first issue from search results if available
+    // This repeats the retained legacy search helper to select a demonstration issue.
     if let Ok(results) = client.search_issues("ORDER BY created DESC", 0, 1).await {
         if let Some(issue) = results.issues.first() {
             let issue_key = &issue.key;

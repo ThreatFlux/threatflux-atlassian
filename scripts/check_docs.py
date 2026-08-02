@@ -16,6 +16,7 @@ CLI_README = ROOT / "crates/threatflux-atlassian-cli/README.md"
 ACTION_README = ROOT / "crates/threatflux-atlassian-action/README.md"
 USAGE = ROOT / "docs/USAGE.md"
 CONFIG_REFERENCE = ROOT / "docs/SDK_CONFIGURATION.md"
+SECURITY_POLICY = ROOT / "SECURITY.md"
 QUICKSTART = ROOT / "crates/threatflux-atlassian-sdk/examples/quickstart.rs"
 RETIREMENT_NOTICE = (
     "https://support.atlassian.com/atlassian-rovo-mcp-server/docs/"
@@ -24,6 +25,14 @@ RETIREMENT_NOTICE = (
 SDK_CRATE_URL = "https://crates.io/crates/threatflux-atlassian-sdk"
 CLI_CRATE_URL = "https://crates.io/crates/threatflux-atlassian-cli"
 RELEASES_URL = "https://github.com/ThreatFlux/threatflux-atlassian/releases"
+ISSUE_SEARCH_REFERENCE = (
+    "https://developer.atlassian.com/cloud/jira/platform/rest/v2/"
+    "api-group-issue-search/"
+)
+PROJECT_DEPRECATION_NOTICE = (
+    "https://developer.atlassian.com/cloud/jira/platform/"
+    "deprecation-notice-removal-of-get-filters-and-get-all-projects/"
+)
 
 
 def read(path: Path) -> str:
@@ -83,6 +92,7 @@ def load_docs() -> dict[Path, str]:
         ACTION_README: read(ACTION_README),
         USAGE: read(USAGE),
         CONFIG_REFERENCE: read(CONFIG_REFERENCE),
+        SECURITY_POLICY: read(SECURITY_POLICY),
     }
 
 
@@ -95,6 +105,7 @@ def check_sections(docs: dict[Path, str], errors: list[str]) -> None:
             "Security",
             "License",
             "Remote MCP Status",
+            "Legacy Jira Search and Project Listing",
             "Version and Release Channels",
         ],
         SDK_README: [
@@ -194,6 +205,43 @@ def check_remote_guidance(docs: dict[Path, str], errors: list[str]) -> None:
             )
 
 
+def check_legacy_jira_guidance(docs: dict[Path, str], errors: list[str]) -> None:
+    shared_snippets = (
+        "/rest/api/2/search",
+        "/rest/api/2/search/jql",
+        "/rest/api/2/project",
+        "/rest/api/2/project/search",
+        ISSUE_SEARCH_REFERENCE,
+        PROJECT_DEPRECATION_NOTICE,
+    )
+    for path in (ROOT_README, SDK_README, CLI_README, USAGE):
+        for snippet in shared_snippets:
+            if snippet not in docs[path]:
+                errors.append(
+                    f"{path.relative_to(ROOT)} is missing legacy Jira guidance: "
+                    f"{snippet}"
+                )
+
+    for snippet in (
+        "/rest/api/2/search",
+        "/rest/api/2/search/jql",
+        ISSUE_SEARCH_REFERENCE,
+    ):
+        if snippet not in docs[ACTION_README]:
+            errors.append(
+                f"Action README is missing its legacy Jira search caveat: {snippet}"
+            )
+
+
+def check_security_support_policy(docs: dict[Path, str], errors: list[str]) -> None:
+    text = docs[SECURITY_POLICY]
+    for label in ("Latest published release", "`main`", "Older releases"):
+        if label not in text:
+            errors.append(f"SECURITY.md is missing release-independent label: {label}")
+    if re.search(r"\b\d+\.\d+\.x\b", text):
+        errors.append("SECURITY.md pins support to a minor release line")
+
+
 def check_quickstarts(docs: dict[Path, str], errors: list[str]) -> None:
     expected_quickstart = read(QUICKSTART).strip()
     for path in (ROOT_README, SDK_README):
@@ -243,6 +291,8 @@ def main() -> int:
     check_install_guidance(docs, errors)
     check_affiliation(docs, errors)
     check_remote_guidance(docs, errors)
+    check_legacy_jira_guidance(docs, errors)
+    check_security_support_policy(docs, errors)
     check_quickstarts(docs, errors)
     feature_count = check_features(docs, sdk_manifest, errors)
     check_local_links(list(docs), errors)

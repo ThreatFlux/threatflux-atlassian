@@ -30,6 +30,18 @@
 //! [Basic authentication guidance](https://developer.atlassian.com/cloud/jira/platform/basic-auth-for-rest-apis/)
 //! before designing a distributable integration.
 //!
+//! ## Legacy Jira endpoint warning
+//!
+//! [`AtlassianClient::search_issues`] and [`AtlassianClient::get_project_issues`]
+//! call `GET /rest/api/2/search`, which Atlassian marks as currently being removed.
+//! [`AtlassianClient::get_projects`] calls the deprecated non-paginated
+//! `GET /rest/api/2/project` route. These helpers remain available for compatibility,
+//! but new implementations should use enhanced search at `/rest/api/2/search/jql`
+//! and paginated project search at `/rest/api/2/project/search`. This crate does not
+//! yet model those replacements' current response and pagination types. See the
+//! [issue-search reference](https://developer.atlassian.com/cloud/jira/platform/rest/v2/api-group-issue-search/)
+//! and [project deprecation notice](https://developer.atlassian.com/cloud/jira/platform/deprecation-notice-removal-of-get-filters-and-get-all-projects/).
+//!
 //! ## Configuration and transport
 //!
 //! [`AtlassianConfig`] defaults to a 60-second timeout, TLS certificate verification,

@@ -14,6 +14,12 @@ and is intended to:
 - dedupe against existing Jira issues
 - create Jira issues through the shared Atlassian SDK
 
+> [!WARNING]
+> Deduplication currently calls the SDK's legacy `search_issues` helper and inherits Atlassian's removal of
+> `GET /rest/api/2/search`. Issue creation uses the supported direct issue endpoint. Before adopting this Action for new
+> automation, plan replacement of deduplication with enhanced `/rest/api/2/search/jql`; see Atlassian's
+> [issue-search reference](https://developer.atlassian.com/cloud/jira/platform/rest/v2/api-group-issue-search/).
+
 See the repository [usage guide](../../docs/USAGE.md#github-action-usage) for required variables, inputs, outputs, and a
 complete consumer workflow.
 

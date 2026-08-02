@@ -29,8 +29,9 @@ The SDK is the primary library surface; the CLI and Action build on it.
 | GitHub Action | [`threatflux-atlassian-action`](crates/threatflux-atlassian-action/) | Event-to-Jira automation from committed rules | Built on the direct SDK |
 | Legacy Remote MCP module | `AtlassianRemoteClient` | API evaluation and migration work only | Incompatible with the current Atlassian endpoint |
 
-The direct SDK currently covers issue retrieval, creation and field updates; JQL search; comments; assignments; issue
-links; attachments; changelogs; workflow transitions; projects; users; and field discovery. It does not claim complete
+The direct SDK covers issue retrieval, creation and field updates; comments; assignments; issue links; attachments;
+changelogs; workflow transitions; individual project lookup; users; and field discovery. It also retains legacy JQL
+search and non-paginated project-list helpers with the upstream-deprecation caveats below. It does not claim complete
 coverage of Jira, Confluence, Compass, Jira Software, or Jira Service Management.
 
 ## Installation
@@ -79,6 +80,20 @@ cargo run -p threatflux-atlassian-sdk --example quickstart
 `JIRA_URL`. Atlassian recommends this form of authentication for personal scripts, bots, and other ad-hoc calls; review
 their [Basic auth guidance](https://developer.atlassian.com/cloud/jira/platform/basic-auth-for-rest-apis/) before
 shipping a distributable integration.
+
+## Legacy Jira Search and Project Listing
+
+> [!WARNING]
+> `search_issues` and `get_project_issues` call `GET /rest/api/2/search`, which Atlassian marks as currently being
+> removed. `get_projects` calls the deprecated, non-paginated `GET /rest/api/2/project` route. These helpers are retained
+> for compatibility and are not recommended foundations for new integrations.
+
+Atlassian's current replacements are enhanced issue search at `GET` or `POST /rest/api/2/search/jql` and paginated
+project search at `GET /rest/api/2/project/search`. The SDK does not yet model their current pagination and response
+types; use an implementation of those endpoints for new search/listing work and track equivalent SDK implementation
+before migrating. See Atlassian's [issue-search reference](https://developer.atlassian.com/cloud/jira/platform/rest/v2/api-group-issue-search/)
+and [project endpoint deprecation notice](https://developer.atlassian.com/cloud/jira/platform/deprecation-notice-removal-of-get-filters-and-get-all-projects/).
+Other direct Jira operations remain the supported path in this workspace.
 
 ## Configuration and Operational Behavior
 
@@ -134,14 +149,20 @@ tflux-atlassian issue-comment-add KAN-123 --body-file ./review.md
 tflux-atlassian issue-transition KAN-123 --status "In Progress"
 ```
 
+`issue-search`, `project-issues`, and `projects-list` use the legacy endpoints described in
+[Legacy Jira Search and Project Listing](#legacy-jira-search-and-project-listing). Treat those commands as compatibility
+tools while planning migration to Atlassian's current endpoints.
+
 See the [CLI README](crates/threatflux-atlassian-cli/README.md) and [usage guide](docs/USAGE.md) for all operator
 commands and secret-handling options.
 
 ## GitHub Action
 
 The Docker action evaluates a committed rules file against the GitHub issue event, deduplicates matching work, and can
-create a Jira issue through the direct SDK. Keep credentials in repository or organization secrets and pin the action
-to a reviewed full commit SHA in production:
+create a Jira issue through the direct SDK. Its deduplication query currently uses the legacy `search_issues` helper and
+therefore inherits its upstream-removal risk; issue creation uses the supported direct issue endpoint.
+
+Keep credentials in repository or organization secrets and pin the action to a reviewed full commit SHA in production:
 
 ```yaml
 - uses: ThreatFlux/threatflux-atlassian@<full-commit-sha>
