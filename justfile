@@ -171,8 +171,12 @@ sbom:
 security: audit deny
     @echo "All security checks passed!"
 
+# Check README metadata, synchronized examples, feature flags, and local links.
+docs-check:
+    @python3 scripts/check_docs.py
+
 # Build documentation.
-docs:
+docs: docs-check
     @echo "Building documentation..."
     @RUSTDOCFLAGS="-D warnings" {{ cargo }} doc --all-features --no-deps
     @echo "Documentation built!"
@@ -213,7 +217,7 @@ docker-push:
     @echo "Image pushed!"
 
 # Run pre-commit checks.
-pre-commit: fmt-check lint test-doc
+pre-commit: fmt-check lint test-doc docs-check
     @echo "Pre-commit checks passed!"
 
 # Run the full local CI suite.

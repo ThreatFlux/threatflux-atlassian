@@ -457,7 +457,15 @@ impl AtlassianClient {
         self.get_issue(&created_issue.key).await
     }
 
-    /// Search for issues using JQL
+    /// Search for issues using JQL through Jira's legacy GET search route.
+    ///
+    /// # Upstream deprecation
+    ///
+    /// This compatibility helper calls `GET /rest/api/2/search`, which Atlassian
+    /// marks as currently being removed. It does not implement enhanced search at
+    /// `/rest/api/2/search/jql`; use an implementation of that current endpoint for
+    /// new integrations. See Atlassian's
+    /// [issue-search reference](https://developer.atlassian.com/cloud/jira/platform/rest/v2/api-group-issue-search/).
     ///
     /// # Arguments
     /// * `jql` - Jira Query Language string
@@ -534,7 +542,15 @@ impl AtlassianClient {
         Ok(user)
     }
 
-    /// Get all projects accessible to the current user
+    /// Get projects through Jira's legacy non-paginated project route.
+    ///
+    /// # Upstream deprecation
+    ///
+    /// This compatibility helper calls deprecated `GET /rest/api/2/project`.
+    /// Atlassian directs new implementations to paginated
+    /// `GET /rest/api/2/project/search`, whose response type is not modeled here.
+    /// See the
+    /// [project endpoint deprecation notice](https://developer.atlassian.com/cloud/jira/platform/deprecation-notice-removal-of-get-filters-and-get-all-projects/).
     ///
     /// # Example
     /// ```rust,no_run
@@ -823,7 +839,11 @@ impl AtlassianClient {
         }
     }
 
-    /// Get issues for a specific project
+    /// Get issues for a project through Jira's legacy GET search route.
+    ///
+    /// This compatibility helper delegates to [`Self::search_issues`] and therefore
+    /// calls the upstream-deprecated `GET /rest/api/2/search` endpoint. Use an
+    /// implementation of enhanced search at `/rest/api/2/search/jql` for new work.
     ///
     /// # Arguments
     /// * `project_key` - Project key (e.g., "PROJ")

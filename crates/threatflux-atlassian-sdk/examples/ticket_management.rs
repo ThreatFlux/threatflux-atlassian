@@ -193,8 +193,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   fields.insert(\"customfield_10100\".to_string(), Value::Number(5.0.into()));");
     println!("   client.update_issue(\"TMP-123\", fields).await?;");
 
-    // 5. Search and Filter Operations
-    println!("\n5️⃣ Search and Filter Examples (like Python JQL queries):");
+    // 5. Legacy Search and Filter Operations
+    println!("\n5️⃣ Legacy Search and Filter Examples (compatibility only):");
+    println!(
+        "   ⚠️  search_issues uses GET /rest/api/2/search, which Atlassian is removing; \
+         use enhanced /rest/api/2/search/jql in new implementation work."
+    );
 
     let search_examples = vec![
         ("Recent Issues", "created >= -7d ORDER BY created DESC"),
@@ -257,13 +261,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("6. **Field Management**: Discover and update custom fields dynamically");
 
     println!("\n📚 Key SDK Capabilities:");
-    println!("✅ Full CRUD operations for Jira issues");
+    println!("✅ Focused create, read, and update operations for Jira issues");
     println!("✅ Custom field support (Story Points, Improvement Area, Complexity)");
     println!("✅ Authentication with API tokens");
-    println!("✅ SSL/TLS support for corporate environments");
-    println!("✅ Comprehensive error handling with retry logic");
-    println!("✅ JQL search with pagination");
-    println!("✅ Project and user management");
+    println!("✅ rustls transport with custom trust-root support");
+    println!("✅ Typed errors; callers provide retry and backoff policy");
+    println!("⚠️  Retained legacy JQL search helper; not recommended for new integrations");
+    println!("✅ Individual project lookup and user operations");
 
     Ok(())
 }

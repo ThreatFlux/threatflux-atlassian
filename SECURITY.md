@@ -2,9 +2,14 @@
 
 ## Supported Versions
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 0.3.x   | :white_check_mark: |
+| Release line | Status |
+| --- | --- |
+| Latest published release | Supported |
+| `main` | Development; fixes target the next release |
+| Older releases | Unsupported |
+
+Upgrade to the latest published release before requesting a backport. Security fixes ordinarily land on `main` and in
+the next release; maintainers will announce any exceptional older-line support explicitly.
 
 ## Reporting a Vulnerability
 
@@ -57,8 +62,8 @@ We consider security research conducted in good faith to be authorized. We will 
 ### Code Quality
 
 - Static analysis with Clippy (pedantic + nursery)
-- Comprehensive test coverage
-- Code review required for all changes
+- Automated workspace, documentation, and feature checks
+- Contributor and maintainer review is expected before changes are merged
 
 ### CI/CD Security
 
@@ -73,8 +78,15 @@ This project contains security-relevant capabilities:
 
 - Jira automation against production Atlassian Cloud tenants
 - API-token based authentication flows
-- Atlassian Remote MCP / OAuth support
+- legacy Atlassian Remote MCP / OAuth code retained for compatibility assessment
 - reusable request/response models that may be embedded in other ThreatFlux services
+
+The direct SDK sends an Atlassian account email and API token with Basic authentication. Use a least-privilege account,
+rotate tokens, keep certificate verification enabled, and do not log or serialize `AtlassianConfig`. Jira error bodies
+can also reach error-level tracing output.
+
+The legacy Remote MCP client targets Atlassian's retired `/v1/sse` endpoint and must not be treated as a supported
+authentication path for the current Rovo MCP service. See the SDK README for its exact limitations.
 
 ## Acknowledgments
 

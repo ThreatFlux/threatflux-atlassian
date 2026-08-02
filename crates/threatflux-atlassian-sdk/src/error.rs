@@ -1,14 +1,14 @@
 //! Error handling for the Atlassian Rust SDK
 //!
-//! This module provides comprehensive error types for all Atlassian API operations,
-//! including Jira authentication, ticket operations, and HTTP communication errors.
+//! This module provides errors for the implemented Jira and legacy Remote MCP paths,
+//! including authentication, configuration, API, and transport failures.
 
 use serde::{Deserialize, Serialize};
 
 /// Result type alias for SDK operations
 pub type Result<T> = std::result::Result<T, AtlassianError>;
 
-/// Comprehensive error types for Atlassian SDK operations
+/// Error variants returned by SDK operations.
 #[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]
 pub enum AtlassianError {
     /// HTTP request errors with optional status codes

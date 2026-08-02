@@ -2,6 +2,8 @@
 
 CLI for Atlassian Jira workflows used by ThreatFlux.
 
+This independent project is not affiliated with, endorsed by, or sponsored by Atlassian.
+
 ## Overview
 
 `threatflux-atlassian-cli` provides a command-line interface (binary: `tflux-atlassian`) on top of
@@ -12,10 +14,17 @@ environment management.
 
 The CLI currently focuses on direct Jira REST workflows built on top of the shared SDK.
 
+> [!WARNING]
+> `issue-search` and `project-issues` use upstream-deprecated `GET /rest/api/2/search`; `projects-list` uses deprecated
+> `GET /rest/api/2/project`. Treat these commands as compatibility tools, not foundations for new automation. Atlassian
+> documents enhanced search at `/rest/api/2/search/jql` and paginated project search at `/rest/api/2/project/search`.
+> See the official [issue-search reference](https://developer.atlassian.com/cloud/jira/platform/rest/v2/api-group-issue-search/)
+> and [project deprecation notice](https://developer.atlassian.com/cloud/jira/platform/deprecation-notice-removal-of-get-filters-and-get-all-projects/).
+
 ## Key Capabilities
 
 - Fetch profile + API health
-- Get/search issues and list project issues via JQL
+- Get issues; retained legacy commands search issues and list project issues via JQL
 - List/find Jira fields
 - Create issues from JSON payloads
 - Update arbitrary issue fields, story points, or custom fields
@@ -36,12 +45,30 @@ The CLI uses environment-based config by default (with optional CLI overrides):
 | `JIRA_URL`         | Jira base URL (for example `https://company.atlassian.net`) |
 | `JIRA_USERNAME`    | Jira account email/username                                 |
 | `JIRA_API_TOKEN`   | Jira API token                                              |
-| `JIRA_TIMEOUT`     | HTTP timeout in seconds                                     |
-| `JIRA_VERIFY_SSL`  | SSL verification toggle (`true`/`false`)                    |
-| `JIRA_CERT_PATH`   | Optional custom CA certificate path                         |
-| `JIRA_MAX_RETRIES` | Max retries for transient failures                          |
+| `JIRA_TIMEOUT`     | HTTP timeout in seconds (default: `60`)                      |
+| `JIRA_VERIFY_SSL`  | Only case-insensitive `false` disables verification         |
+| `JIRA_CERT_PATH`   | Optional PEM or DER trust-root path                          |
+| `JIRA_MAX_RETRIES` | Stored count (default: `3`); no automatic retries occur     |
 
 CLI flags such as `--base-url`, `--username`, `--api-token`, `--timeout`, and `--insecure` can override env values.
+The underlying direct client uses rustls and disables system proxy discovery, so proxy environment variables are not
+honored. See the [SDK configuration reference](https://github.com/ThreatFlux/threatflux-atlassian/blob/main/docs/SDK_CONFIGURATION.md)
+for exact behavior.
+
+Prefer secret environment injection over `--api-token`, because command arguments can be visible to other local
+processes and shell history.
+
+## Installation
+
+Install the latest published [CLI crate](https://crates.io/crates/threatflux-atlassian-cli):
+
+```bash
+cargo install --locked threatflux-atlassian-cli
+```
+
+Prebuilt binaries are available from [GitHub Releases](https://github.com/ThreatFlux/threatflux-atlassian/releases).
+Release tags identify source and binary artifacts and can differ from the Cargo package versions embedded in that
+source; inspect the tagged manifest when exact package provenance matters.
 
 ## Build and Run
 
@@ -56,7 +83,7 @@ cargo build -p threatflux-atlassian-cli --release
 # Show authenticated Jira user profile
 ./target/release/tflux-atlassian profile
 
-# Search issues
+# Legacy issue search command; use Atlassian's enhanced search endpoint for new integrations
 ./target/release/tflux-atlassian issue-search --jql "project = SEC ORDER BY created DESC" --limit 25
 
 # Get one issue
@@ -120,4 +147,4 @@ crates/threatflux-atlassian-cli/
 
 ## License
 
-See [LICENSE](../../LICENSE).
+See the [MIT License](https://github.com/ThreatFlux/threatflux-atlassian/blob/main/LICENSE).
