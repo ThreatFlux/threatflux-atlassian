@@ -1,131 +1,60 @@
-//! # Atlassian Rust SDK
+//! # `threatflux-atlassian-sdk`
 //!
-//! A comprehensive Rust SDK for Atlassian products with dual architecture support:
-//! **Remote MCP Server** (recommended) and **Direct API** access for Jira, Confluence, and Compass.
+//! An async Rust client for focused Jira Cloud REST API v2 automation. The supported
+//! path is [`AtlassianClient`], which authenticates with an Atlassian account email
+//! and API token. It covers common issue, search, comment, assignment, link,
+//! attachment, changelog, transition, project, user, and field operations.
 //!
-//! ## Features
+//! This independent project is not affiliated with, endorsed by, or sponsored by
+//! Atlassian. It is not a complete SDK for Jira, Confluence, Compass, Jira Software,
+//! or Jira Service Management.
 //!
-//! - **🌐 Remote MCP Server**: OAuth 2.1 authentication via <https://mcp.atlassian.com/v1/sse>
-//! - **🔑 OAuth 2.1 + PKCE**: Secure browser-based authentication with MCP auth screen
-//! - **📋 Jira Operations**: Complete ticket CRUD, search, custom fields (story points, complexity)
-//! - **📖 Confluence**: Content management and documentation operations
-//! - **🧭 Compass**: Service landscape and component management
-//! - **🔒 Security**: Respects existing Atlassian Cloud permissions and access controls
-//! - **⚡ Async Support**: Built on Tokio for high-performance operations
-//! - **🏢 Enterprise Ready**: SSL verification and corporate environment support
+//! ## Quickstart
 //!
-//! ## Remote MCP Server (Recommended)
-//!
-//! Use Atlassian's cloud-based Remote MCP Server for secure, permission-respecting operations:
+//! Set `JIRA_URL`, `JIRA_USERNAME`, and `JIRA_API_TOKEN`, then create a client:
 //!
 //! ```rust,no_run
-//! use threatflux_atlassian_sdk::AtlassianRemoteClient;
-//! use std::collections::HashMap;
-//!
-//! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     // Create Remote MCP client
-//!     let client = AtlassianRemoteClient::new(
-//!         "your-oauth-client-id".to_string(),
-//!         8080  // Local callback port
-//!     )?;
-//!
-//!     // Initialize OAuth 2.1 authentication (shows auth screen)
-//!     let auth_response = client.initialize_auth().await?;
-//!     println!("Visit auth URL: {}", auth_response["auth_url"]);
-//!
-//!     // After OAuth completion...
-//!     // client.complete_auth(auth_code, state).await?;
-//!
-//!     // Use Jira operations via Remote MCP Server
-//!     let issue = client.get_issue("PROJ-123").await?;
-//!     client.update_story_points("PROJ-123", 8.0, "customfield_10100").await?;
-//!
-//!     Ok(())
-//! }
-//! ```
-//!
-//! ## Direct API Client (Legacy)
-//!
-//! For direct Jira API access (requires API tokens):
-//!
-//! ```rust,no_run
-//! use threatflux_atlassian_sdk::{AtlassianClient, AtlassianConfig};
+//! use threatflux_atlassian_sdk::AtlassianClient;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let client = AtlassianClient::from_env()?;
-//!     let issue = client.get_issue("PROJ-123").await?;
+//!     let issue = client.get_issue("KAN-123").await?;
+//!     println!("{}: {}", issue.key, issue.fields.summary);
 //!     Ok(())
 //! }
 //! ```
 //!
-//! ## OAuth Configuration
+//! The direct client sends Basic authentication to `/rest/api/2` routes below the
+//! configured Jira URL. Use an API token, not an account password. See Atlassian's
+//! [Basic authentication guidance](https://developer.atlassian.com/cloud/jira/platform/basic-auth-for-rest-apis/)
+//! before designing a distributable integration.
 //!
-//! For Remote MCP Server (OAuth 2.1):
+//! ## Configuration and transport
 //!
-//! ```bash
-//! export ATLASSIAN_CLIENT_ID="your-oauth-client-id"
-//! export ATLASSIAN_CALLBACK_PORT="8080"           # Optional: OAuth callback port
-//! ```
+//! [`AtlassianConfig`] defaults to a 60-second timeout, TLS certificate verification,
+//! three stored retry attempts, and a one-second stored retry delay. The retry values
+//! are not executed automatically in version 0.4.2; callers own backoff and write
+//! idempotency. A custom PEM or DER root certificate can be added with
+//! [`AtlassianConfig::with_cert_path`].
 //!
-//! For Direct API (Legacy):
+//! The reqwest client uses rustls and disables system proxy discovery. Proxy
+//! environment variables are not honored. Disabling certificate verification calls
+//! reqwest's dangerous invalid-certificate option and should be limited to controlled
+//! local testing.
 //!
-//! ```bash
-//! export JIRA_URL="https://company.atlassian.net"
-//! export JIRA_USERNAME="user@company.com"
-//! export JIRA_API_TOKEN="your-api-token"
-//! ```
+//! ## Legacy Remote MCP warning
 //!
-//! ## Advanced Usage
+//! [`AtlassianRemoteClient`] is retained for compatibility and migration assessment,
+//! but it is not usable with Atlassian's current Rovo MCP service. It hard-codes the
+//! retired `https://mcp.atlassian.com/v1/sse` endpoint, does not implement Streamable
+//! HTTP, does not host an OAuth callback listener, and keeps tokens only in memory.
+//! Atlassian stopped supporting the SSE endpoint after June 30, 2026; consult the
+//! [official migration notice](https://support.atlassian.com/atlassian-rovo-mcp-server/docs/configuring-oauth-2-1/).
 //!
-//! ```rust,no_run
-//! use threatflux_atlassian_sdk::{AtlassianConfig, AtlassianClient};
-//! use threatflux_atlassian_sdk::{CreateIssueRequest, CreateIssueFields};
-//! use threatflux_atlassian_sdk::{ProjectReference, IssueTypeReference, UserReference};
-//! use std::time::Duration;
-//! use std::collections::HashMap;
-//!
-//! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     // Create custom configuration
-//!     let config = AtlassianConfig::builder()
-//!         .base_url("https://company.atlassian.net")
-//!         .username("user@company.com")
-//!         .api_token("your-api-token")
-//!         .timeout(Duration::from_secs(30))
-//!         .verify_ssl(true)
-//!         .retries(5, Duration::from_millis(500))
-//!         .build()?;
-//!
-//!     let client = AtlassianClient::new(config)?;
-//!
-//!     // Create a new issue
-//!     let mut custom_fields = HashMap::new();
-//!     custom_fields.insert("customfield_11024".to_string(),
-//!                          serde_json::json!({"value": "Security"}));
-//!
-//!     let create_request = CreateIssueRequest {
-//!         fields: CreateIssueFields {
-//!             project: ProjectReference::by_key("TMP"),
-//!             summary: "New security task".to_string(),
-//!             issue_type: IssueTypeReference::by_name("Task"),
-//!             description: Some("Security enhancement task".to_string()),
-//!             assignee: Some(UserReference::by_account_id("account123")),
-//!             priority: None,
-//!             labels: Some(vec!["security".to_string(), "automation".to_string()]),
-//!             components: None,
-//!             parent: None,
-//!             custom_fields,
-//!         },
-//!     };
-//!
-//!     let created_issue = client.create_issue(create_request).await?;
-//!     println!("Created issue: {}", created_issue.key);
-//!
-//!     Ok(())
-//! }
-//! ```
+//! The `direct`, `remote`, and `ssl-verification` Cargo features are compatibility
+//! markers in version 0.4.2 and do not gate modules, dependencies, or runtime TLS
+//! behavior.
 
 #![allow(clippy::all, clippy::pedantic, clippy::nursery)]
 #![warn(missing_docs)]

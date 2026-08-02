@@ -179,7 +179,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   (Not executed to avoid creating test issues)");
 
     println!("\n🎉 Atlassian SDK Example Complete!");
-    println!("The SDK provides comprehensive Jira operations:");
+    println!("The SDK provides focused Jira operations:");
     println!("✅ Authentication and health checks");
     println!("✅ Issue retrieval and search");
     println!("✅ Custom field discovery and updates");

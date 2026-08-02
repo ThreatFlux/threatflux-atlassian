@@ -1,7 +1,9 @@
-//! OAuth 2.1 authentication for Atlassian Remote MCP Server
+//! Legacy OAuth helpers for the retired Atlassian Remote MCP implementation.
 //!
-//! This module implements OAuth 2.1 authentication flow for connecting to
-//! Atlassian's Remote MCP Server at <https://mcp.atlassian.com/v1/sse>
+//! These helpers generate a PKCE authorization URL and exchange caller-supplied
+//! callback values, but they do not host a callback server or persist tokens. The
+//! associated client targets an endpoint Atlassian stopped supporting after June 30,
+//! 2026 and is not compatible with the current Rovo MCP service.
 
 use crate::error::{AtlassianError, Result};
 use base64::Engine;
@@ -12,7 +14,7 @@ use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 use url::Url;
 
-/// OAuth 2.1 configuration for Atlassian Remote MCP Server
+/// OAuth configuration used by the legacy Remote MCP flow.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OAuthConfig {
     /// Client ID for OAuth application
@@ -103,7 +105,7 @@ impl AuthManager {
         }
     }
 
-    /// Create OAuth configuration for Atlassian Remote MCP Server
+    /// Create the hard-coded OAuth configuration used by the legacy Remote MCP flow.
     pub fn create_atlassian_oauth_config(
         client_id: String,
         redirect_uri: &str,
@@ -112,7 +114,7 @@ impl AuthManager {
         let token_endpoint = Url::parse("https://auth.atlassian.com/oauth/token")?;
         let redirect_uri = Url::parse(redirect_uri)?;
 
-        // Standard Atlassian OAuth scopes for MCP operations
+        // Legacy hard-coded scope set; it is not verified against the current service.
         let scopes = vec![
             "read:jira-work".to_string(),
             "write:jira-work".to_string(),
@@ -337,19 +339,19 @@ impl AuthManager {
     }
 }
 
-/// Authorization proxy server for handling OAuth flow within MCP
+/// Legacy authorization-flow coordinator; it does not run a proxy or callback server.
 #[derive(Debug)]
 pub struct AuthorizationProxy {
     /// OAuth configuration
     oauth_config: OAuthConfig,
     /// Authorization manager
     auth_manager: Arc<AuthManager>,
-    /// Server port for OAuth callbacks
+    /// Port embedded in the callback URL
     callback_port: u16,
 }
 
 impl AuthorizationProxy {
-    /// Create new authorization proxy
+    /// Create a new legacy authorization-flow coordinator.
     pub fn new(oauth_config: OAuthConfig, callback_port: u16) -> Self {
         let auth_manager = Arc::new(AuthManager::new(oauth_config.clone()));
 
@@ -360,11 +362,11 @@ impl AuthorizationProxy {
         }
     }
 
-    /// Start authorization flow and return auth URL for user
+    /// Start the legacy authorization flow and return an auth URL for the caller.
     pub async fn start_authorization_flow(&mut self) -> Result<String> {
         info!("Starting OAuth 2.1 authorization flow");
 
-        // Update redirect URI to use local callback server
+        // Update the redirect URI. The caller is responsible for hosting this callback.
         self.oauth_config.redirect_uri = Url::parse(&format!(
             "http://localhost:{}/oauth/callback",
             self.callback_port
@@ -403,7 +405,7 @@ impl AuthorizationProxy {
     }
 }
 
-/// MCP authorization handler for embedding auth flow in MCP responses
+/// Authorization state holder for the legacy Remote MCP flow.
 #[derive(Debug)]
 pub struct McpAuthHandler {
     /// Authorization proxy
@@ -413,7 +415,7 @@ pub struct McpAuthHandler {
 }
 
 impl McpAuthHandler {
-    /// Create new MCP auth handler
+    /// Create a new legacy authorization handler.
     pub fn new(client_id: String, callback_port: u16) -> Result<Self> {
         let oauth_config = AuthManager::create_atlassian_oauth_config(
             client_id,
@@ -428,7 +430,7 @@ impl McpAuthHandler {
         })
     }
 
-    /// Generate MCP authorization response with embedded auth screen
+    /// Generate a legacy authorization response for the caller to present.
     pub async fn generate_auth_response(&mut self) -> Result<serde_json::Value> {
         if self.proxy.is_authenticated().await {
             info!("User already authenticated");
@@ -443,25 +445,25 @@ impl McpAuthHandler {
             let auth_url = self.proxy.start_authorization_flow().await?;
             self.auth_flow_active = true;
 
-            // Return MCP response with auth screen
+            // Return migration-oriented instructions. This SDK does not host the callback.
             Ok(serde_json::json!({
                 "type": "authorization_required",
-                "message": "Atlassian OAuth 2.1 authorization required",
+                "message": "Legacy Atlassian OAuth authorization required",
                 "auth_url": auth_url,
                 "instructions": [
-                    "1. Click the authorization URL above",
-                    "2. Sign in to your Atlassian account",
-                    "3. Grant permissions for Jira, Confluence, and Compass access",
-                    "4. Complete the OAuth flow to continue"
+                    "1. This flow targets the retired Atlassian Remote MCP implementation",
+                    "2. The caller must present the authorization URL",
+                    "3. The caller must host the configured localhost callback",
+                    "4. Pass the returned code and state to complete_auth"
                 ],
                 "scopes": self.proxy.oauth_config.scopes,
                 "provider": "Atlassian Cloud",
-                "security_note": "This uses OAuth 2.1 with PKCE for enhanced security"
+                "security_note": "PKCE and state are generated, but tokens remain in memory and the current Rovo MCP service is unsupported"
             }))
         }
     }
 
-    /// Process OAuth callback from authorization flow
+    /// Process callback values received and supplied by the caller.
     pub async fn process_callback(
         &mut self,
         code: String,

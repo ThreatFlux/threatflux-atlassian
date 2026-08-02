@@ -2,6 +2,8 @@
 
 CLI for Atlassian Jira workflows used by ThreatFlux.
 
+This independent project is not affiliated with, endorsed by, or sponsored by Atlassian.
+
 ## Overview
 
 `threatflux-atlassian-cli` provides a command-line interface (binary: `tflux-atlassian`) on top of
@@ -36,12 +38,29 @@ The CLI uses environment-based config by default (with optional CLI overrides):
 | `JIRA_URL`         | Jira base URL (for example `https://company.atlassian.net`) |
 | `JIRA_USERNAME`    | Jira account email/username                                 |
 | `JIRA_API_TOKEN`   | Jira API token                                              |
-| `JIRA_TIMEOUT`     | HTTP timeout in seconds                                     |
-| `JIRA_VERIFY_SSL`  | SSL verification toggle (`true`/`false`)                    |
-| `JIRA_CERT_PATH`   | Optional custom CA certificate path                         |
-| `JIRA_MAX_RETRIES` | Max retries for transient failures                          |
+| `JIRA_TIMEOUT`     | HTTP timeout in seconds (default: `60`)                      |
+| `JIRA_VERIFY_SSL`  | Only case-insensitive `false` disables verification         |
+| `JIRA_CERT_PATH`   | Optional PEM or DER trust-root path                          |
+| `JIRA_MAX_RETRIES` | Stored count (default: `3`); no automatic retries occur     |
 
 CLI flags such as `--base-url`, `--username`, `--api-token`, `--timeout`, and `--insecure` can override env values.
+The underlying direct client uses rustls and disables system proxy discovery, so proxy environment variables are not
+honored. See the [SDK configuration reference](https://github.com/ThreatFlux/threatflux-atlassian/blob/main/docs/SDK_CONFIGURATION.md)
+for exact behavior.
+
+Prefer secret environment injection over `--api-token`, because command arguments can be visible to other local
+processes and shell history.
+
+## Installation
+
+The latest CLI crate currently published on crates.io is 0.4.1:
+
+```bash
+cargo install threatflux-atlassian-cli --version 0.4.1 --locked
+```
+
+The current workspace source reports 0.4.2. GitHub release `v0.4.3` contains binaries built from a workspace reporting
+0.4.2; GitHub release tags and Cargo package versions are separate channels.
 
 ## Build and Run
 
@@ -120,4 +139,4 @@ crates/threatflux-atlassian-cli/
 
 ## License
 
-See [LICENSE](../../LICENSE).
+See the [MIT License](https://github.com/ThreatFlux/threatflux-atlassian/blob/main/LICENSE).

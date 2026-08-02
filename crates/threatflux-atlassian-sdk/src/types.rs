@@ -1,7 +1,7 @@
 //! Data structures for Jira API objects
 //!
-//! This module contains comprehensive data structures for Jira issues, projects,
-//! users, and other API objects used throughout the Atlassian SDK.
+//! This module contains the focused Jira issue, project, user, and field models used
+//! by the implemented client methods.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -14,14 +14,14 @@ pub struct JiraIssue {
     pub key: String,
     /// Issue ID (numeric)
     pub id: String,
-    /// Issue fields containing all the data
+    /// Issue fields modeled by this crate
     pub fields: IssueFields,
     /// Self URL for the issue
     #[serde(rename = "self")]
     pub self_url: Option<String>,
 }
 
-/// Issue fields containing all issue data
+/// Issue fields modeled by this crate.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct IssueFields {
     /// Issue summary/title

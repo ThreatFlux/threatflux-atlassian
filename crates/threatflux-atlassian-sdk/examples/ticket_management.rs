@@ -257,11 +257,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("6. **Field Management**: Discover and update custom fields dynamically");
 
     println!("\n📚 Key SDK Capabilities:");
-    println!("✅ Full CRUD operations for Jira issues");
+    println!("✅ Focused create, read, and update operations for Jira issues");
     println!("✅ Custom field support (Story Points, Improvement Area, Complexity)");
     println!("✅ Authentication with API tokens");
-    println!("✅ SSL/TLS support for corporate environments");
-    println!("✅ Comprehensive error handling with retry logic");
+    println!("✅ rustls transport with custom trust-root support");
+    println!("✅ Typed errors; callers provide retry and backoff policy");
     println!("✅ JQL search with pagination");
     println!("✅ Project and user management");
 

@@ -1,15 +1,15 @@
 [package]
 name = "threatflux-atlassian-sdk"
 version.workspace = true
-edition = "2021"
-rust-version = "1.96.0"
-description = "ThreatFlux Atlassian SDK for Jira and Atlassian Remote MCP integrations"
-license = "MIT"
+edition.workspace = true
+rust-version.workspace = true
+description = "Async Rust SDK for focused Jira Cloud REST API automation"
+license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 documentation = "https://docs.rs/threatflux-atlassian-sdk"
 readme = "README.md"
-keywords = ["atlassian", "jira", "sdk", "oauth", "mcp"]
+keywords = ["atlassian", "jira", "sdk", "rest", "automation"]
 categories = ["api-bindings", "web-programming"]
 
 [features]
