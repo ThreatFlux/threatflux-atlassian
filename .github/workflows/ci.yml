@@ -240,6 +240,9 @@ jobs:
         with:
           toolchain: ${{ env.RUST_STABLE_VERSION }}
 
+      - name: Check documentation drift and local links
+        run: python3 scripts/check_docs.py
+
       - name: Build documentation
         run: cargo doc --all-features --no-deps
         env:
