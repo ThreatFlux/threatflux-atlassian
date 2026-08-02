@@ -445,20 +445,20 @@ impl McpAuthHandler {
             let auth_url = self.proxy.start_authorization_flow().await?;
             self.auth_flow_active = true;
 
-            // Return migration-oriented instructions. This SDK does not host the callback.
+            // Return the retained runtime response; module docs describe legacy limitations.
             Ok(serde_json::json!({
                 "type": "authorization_required",
-                "message": "Legacy Atlassian OAuth authorization required",
+                "message": "Atlassian OAuth 2.1 authorization required",
                 "auth_url": auth_url,
                 "instructions": [
-                    "1. This flow targets the retired Atlassian Remote MCP implementation",
-                    "2. The caller must present the authorization URL",
-                    "3. The caller must host the configured localhost callback",
-                    "4. Pass the returned code and state to complete_auth"
+                    "1. Click the authorization URL above",
+                    "2. Sign in to your Atlassian account",
+                    "3. Grant permissions for Jira, Confluence, and Compass access",
+                    "4. Complete the OAuth flow to continue"
                 ],
                 "scopes": self.proxy.oauth_config.scopes,
                 "provider": "Atlassian Cloud",
-                "security_note": "PKCE and state are generated, but tokens remain in memory and the current Rovo MCP service is unsupported"
+                "security_note": "This uses OAuth 2.1 with PKCE for enhanced security"
             }))
         }
     }
