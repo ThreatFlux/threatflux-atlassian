@@ -1,0 +1,4 @@
+# Examples require live Jira credentials and are compile-checked in CI instead of
+# executed as coverage targets. Patch coverage remains enabled for library code.
+ignore:
+  - "crates/**/examples/**"
