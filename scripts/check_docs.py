@@ -21,6 +21,9 @@ RETIREMENT_NOTICE = (
     "https://support.atlassian.com/atlassian-rovo-mcp-server/docs/"
     "configuring-oauth-2-1/"
 )
+SDK_CRATE_URL = "https://crates.io/crates/threatflux-atlassian-sdk"
+CLI_CRATE_URL = "https://crates.io/crates/threatflux-atlassian-cli"
+RELEASES_URL = "https://github.com/ThreatFlux/threatflux-atlassian/releases"
 
 
 def read(path: Path) -> str:
@@ -63,14 +66,13 @@ def check_local_links(paths: list[Path], errors: list[str]) -> None:
                 )
 
 
-def load_metadata() -> tuple[dict, str, str]:
+def load_metadata() -> tuple[dict, str]:
     root_manifest = tomllib.loads(read(ROOT / "Cargo.toml"))
     sdk_manifest = tomllib.loads(
         read(ROOT / "crates/threatflux-atlassian-sdk/Cargo.toml")
     )
-    version = root_manifest["workspace"]["package"]["version"]
     msrv = root_manifest["workspace"]["package"]["rust-version"]
-    return sdk_manifest, version, msrv
+    return sdk_manifest, msrv
 
 
 def load_docs() -> dict[Path, str]:
@@ -120,21 +122,52 @@ def check_sections(docs: dict[Path, str], errors: list[str]) -> None:
                 errors.append(f"{path.relative_to(ROOT)} is missing section: {section}")
 
 
-def check_versions(
-    docs: dict[Path, str], version: str, msrv: str, errors: list[str]
-) -> None:
-    dependency = f'threatflux-atlassian-sdk = "{version}"'
-    for path in (ROOT_README, SDK_README, USAGE):
-        if dependency not in docs[path]:
-            errors.append(
-                f"{path.relative_to(ROOT)} must show the workspace SDK version {version}"
-            )
-
+def check_msrv(docs: dict[Path, str], msrv: str, errors: list[str]) -> None:
     for path in (ROOT_README, SDK_README, USAGE):
         if msrv not in docs[path]:
             errors.append(
                 f"{path.relative_to(ROOT)} must document the workspace MSRV {msrv}"
             )
+
+
+def check_install_guidance(docs: dict[Path, str], errors: list[str]) -> None:
+    required = {
+        ROOT_README: [
+            "cargo add threatflux-atlassian-sdk",
+            "cargo install --locked threatflux-atlassian-cli",
+            SDK_CRATE_URL,
+            CLI_CRATE_URL,
+            RELEASES_URL,
+        ],
+        SDK_README: ["cargo add threatflux-atlassian-sdk", SDK_CRATE_URL],
+        CLI_README: [
+            "cargo install --locked threatflux-atlassian-cli",
+            CLI_CRATE_URL,
+            RELEASES_URL,
+        ],
+        USAGE: [
+            "cargo add threatflux-atlassian-sdk",
+            "cargo install --locked threatflux-atlassian-cli",
+            SDK_CRATE_URL,
+            CLI_CRATE_URL,
+            RELEASES_URL,
+        ],
+    }
+    for path, snippets in required.items():
+        text = docs[path]
+        for snippet in snippets:
+            if snippet not in text:
+                errors.append(
+                    f"{path.relative_to(ROOT)} is missing release-safe guidance: "
+                    f"{snippet}"
+                )
+        if "cargo add threatflux-atlassian-sdk@" in text:
+            errors.append(f"{path.relative_to(ROOT)} pins cargo add to a release")
+        for line in text.splitlines():
+            if "cargo install" in line and "--version" in line:
+                errors.append(
+                    f"{path.relative_to(ROOT)} pins cargo install to a release"
+                )
 
 
 def check_affiliation(docs: dict[Path, str], errors: list[str]) -> None:
@@ -187,7 +220,7 @@ def check_features(docs: dict[Path, str], sdk_manifest: dict, errors: list[str])
     return len(manifest_features)
 
 
-def report(errors: list[str], version: str, msrv: str, feature_count: int) -> int:
+def report(errors: list[str], msrv: str, feature_count: int) -> int:
     if errors:
         print("Documentation contract failed:", file=sys.stderr)
         for error in errors:
@@ -195,26 +228,26 @@ def report(errors: list[str], version: str, msrv: str, feature_count: int) -> in
         return 1
 
     print(
-        f"Documentation contract passed (SDK {version}, MSRV {msrv}, "
-        f"{feature_count} feature flags)."
+        f"Documentation contract passed (MSRV {msrv}, {feature_count} feature flags)."
     )
     return 0
 
 
 def main() -> int:
     errors: list[str] = []
-    sdk_manifest, version, msrv = load_metadata()
+    sdk_manifest, msrv = load_metadata()
     docs = load_docs()
 
     check_sections(docs, errors)
-    check_versions(docs, version, msrv, errors)
+    check_msrv(docs, msrv, errors)
+    check_install_guidance(docs, errors)
     check_affiliation(docs, errors)
     check_remote_guidance(docs, errors)
     check_quickstarts(docs, errors)
     feature_count = check_features(docs, sdk_manifest, errors)
     check_local_links(list(docs), errors)
 
-    return report(errors, version, msrv, feature_count)
+    return report(errors, msrv, feature_count)
 
 
 if __name__ == "__main__":

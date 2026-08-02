@@ -5,12 +5,11 @@ affiliated with, endorsed by, or sponsored by Atlassian.
 
 ## Install the SDK
 
-The published SDK crate is 0.4.2:
+Install the latest published [SDK crate](https://crates.io/crates/threatflux-atlassian-sdk):
 
-```toml
-[dependencies]
-threatflux-atlassian-sdk = "0.4.2"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```bash
+cargo add threatflux-atlassian-sdk
+cargo add tokio --features macros,rt-multi-thread
 ```
 
 For unreleased source, pin a reviewed full commit rather than a moving branch or assuming a GitHub release tag equals
@@ -21,8 +20,10 @@ the Cargo package version:
 threatflux-atlassian-sdk = { git = "https://github.com/ThreatFlux/threatflux-atlassian.git", rev = "<full-commit-sha>" }
 ```
 
-Current source declares Rust 1.96.0 as its MSRV. GitHub release `v0.4.3` points at source whose workspace package
-version is still 0.4.2; the crates.io and GitHub release channels must therefore be selected independently.
+Current source declares Rust 1.96.0 as its MSRV. Crates.io packages and
+[GitHub source or binary releases](https://github.com/ThreatFlux/threatflux-atlassian/releases) are separate channels.
+A release tag can differ from the Cargo package versions embedded in its source, so inspect the tagged manifest when
+exact package provenance matters.
 
 ## Direct Jira REST Usage
 
@@ -60,7 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## Legacy Remote MCP API
 
 > [!WARNING]
-> `AtlassianRemoteClient` 0.4.2 is not compatible with Atlassian's current Rovo MCP service. It targets the retired
+> `AtlassianRemoteClient` is not compatible with Atlassian's current Rovo MCP service. It targets the retired
 > `/v1/sse` endpoint, does not implement Streamable HTTP, does not start its advertised callback server, and keeps
 > tokens only in memory. Atlassian stopped supporting the SSE endpoint after June 30, 2026; see the
 > [official migration notice](https://support.atlassian.com/atlassian-rovo-mcp-server/docs/configuring-oauth-2-1/).
@@ -78,13 +79,13 @@ cargo build -p threatflux-atlassian-cli --release
 ./target/release/tflux-atlassian --help
 ```
 
-Install the latest crate currently published for the CLI:
+Install the latest published [CLI crate](https://crates.io/crates/threatflux-atlassian-cli):
 
 ```bash
-cargo install threatflux-atlassian-cli --version 0.4.1 --locked
+cargo install --locked threatflux-atlassian-cli
 ```
 
-GitHub release `v0.4.3` also provides platform binaries even though the embedded Cargo workspace reports 0.4.2. Verify
+[GitHub Releases](https://github.com/ThreatFlux/threatflux-atlassian/releases) also provides platform binaries. Verify
 the adjacent SHA-256 file when using a release asset. For an unreleased source install, use `--git` with a reviewed
 `--rev <full-commit-sha>`.
 
@@ -127,8 +128,8 @@ just ci
 ## Release Notes
 
 - Release artifacts are built around the CLI binary `tflux-atlassian`.
-- GitHub release tags identify artifact/source releases and can differ from the Cargo package versions; `v0.4.3`
-  currently contains a workspace reporting 0.4.2.
+- GitHub release tags identify artifact/source releases and can differ from the Cargo package versions embedded in the
+  tagged source.
 - GitHub releases attach CycloneDX SBOMs for the SDK and CLI crates.
 - The container image embeds a CycloneDX SBOM at `/usr/share/doc/threatflux-atlassian/sbom.cdx.json`.
 - Release publishing verifies the SDK first, publishes it, waits for crates.io index propagation, then verifies and

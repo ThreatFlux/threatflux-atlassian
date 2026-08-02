@@ -53,14 +53,15 @@ processes and shell history.
 
 ## Installation
 
-The latest CLI crate currently published on crates.io is 0.4.1:
+Install the latest published [CLI crate](https://crates.io/crates/threatflux-atlassian-cli):
 
 ```bash
-cargo install threatflux-atlassian-cli --version 0.4.1 --locked
+cargo install --locked threatflux-atlassian-cli
 ```
 
-The current workspace source reports 0.4.2. GitHub release `v0.4.3` contains binaries built from a workspace reporting
-0.4.2; GitHub release tags and Cargo package versions are separate channels.
+Prebuilt binaries are available from [GitHub Releases](https://github.com/ThreatFlux/threatflux-atlassian/releases).
+Release tags identify source and binary artifacts and can differ from the Cargo package versions embedded in that
+source; inspect the tagged manifest when exact package provenance matters.
 
 ## Build and Run
 

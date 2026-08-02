@@ -15,7 +15,7 @@ The SDK is the primary library surface; the CLI and Action build on it.
 > This independent, community-maintained project is not affiliated with, endorsed by, or sponsored by Atlassian.
 
 > [!WARNING]
-> The `remote` API is **not usable with Atlassian's current Rovo MCP service**. Version 0.4.2 targets
+> The `remote` API is **not usable with Atlassian's current Rovo MCP service**. It targets
 > `https://mcp.atlassian.com/v1/sse`, which Atlassian stopped supporting after June 30, 2026. Atlassian now documents
 > a Streamable HTTP endpoint and a different authorization flow. See [Remote MCP status](#remote-mcp-status) and
 > [Atlassian's migration notice](https://support.atlassian.com/atlassian-rovo-mcp-server/docs/configuring-oauth-2-1/).
@@ -35,19 +35,11 @@ coverage of Jira, Confluence, Compass, Jira Software, or Jira Service Management
 
 ## Installation
 
-The SDK is published on crates.io:
+Install the latest published [SDK crate](https://crates.io/crates/threatflux-atlassian-sdk):
 
 ```bash
-cargo add threatflux-atlassian-sdk@0.4.2
+cargo add threatflux-atlassian-sdk
 cargo add tokio --features macros,rt-multi-thread
-```
-
-Or add it directly to `Cargo.toml`:
-
-```toml
-[dependencies]
-threatflux-atlassian-sdk = "0.4.2"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
 Current `main` declares Rust 1.96.0 as its minimum supported Rust version (MSRV). See
@@ -98,7 +90,7 @@ shipping a distributable integration.
 | `JIRA_TIMEOUT` | `60` seconds | Whole-request timeout. Invalid values return a configuration error. |
 | `JIRA_CERT_PATH` | System roots | Adds one PEM- or DER-encoded trust root. |
 | `JIRA_VERIFY_SSL` | `true` | Only the case-insensitive value `false` disables certificate verification. |
-| `JIRA_MAX_RETRIES` | `3` | Stored in configuration, but **0.4.2 does not automatically retry requests**. |
+| `JIRA_MAX_RETRIES` | `3` | Stored in configuration, but the client does **not** automatically retry requests. |
 
 The direct client uses rustls and intentionally disables system proxy discovery with `reqwest::ClientBuilder::no_proxy`;
 `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` are therefore not used. Encrypted credential and env-file inputs are also
@@ -123,12 +115,14 @@ for a supported MCP client. The direct Jira REST client is the supported path in
 
 ## CLI
 
-The CLI package published on crates.io is currently 0.4.1:
+Install the latest published [CLI crate](https://crates.io/crates/threatflux-atlassian-cli):
 
 ```bash
-cargo install threatflux-atlassian-cli --version 0.4.1 --locked
+cargo install --locked threatflux-atlassian-cli
 tflux-atlassian --help
 ```
+
+Prebuilt binaries are available separately from [GitHub Releases](https://github.com/ThreatFlux/threatflux-atlassian/releases).
 
 Common commands include:
 
@@ -165,8 +159,8 @@ Start with the [example rules](examples/github-automation/dependabot-high.yml), 
 
 ## Features
 
-The SDK declares `default`, `full`, `direct`, `remote`, and `ssl-verification`. In 0.4.2 these are compatibility markers:
-they do not gate modules or dependencies, and `ssl-verification` does not control runtime certificate verification.
+The SDK declares `default`, `full`, `direct`, `remote`, and `ssl-verification`. These are compatibility markers: they do
+not gate modules or dependencies, and `ssl-verification` does not control runtime certificate verification.
 See the [SDK feature table](crates/threatflux-atlassian-sdk/README.md#feature-flags) before using
 `default-features = false` to optimize a build.
 
@@ -181,17 +175,13 @@ See the [SDK feature table](crates/threatflux-atlassian-sdk/README.md#feature-fl
 
 ## Version and Release Channels
 
-The package and release channels do not currently share one version number:
+[Crates.io](https://crates.io/crates/threatflux-atlassian-sdk) is the Rust package channel; let `cargo add` and
+`cargo install` resolve the latest compatible published packages. [GitHub Releases](https://github.com/ThreatFlux/threatflux-atlassian/releases)
+is a separate source and binary-artifact channel. A release tag can differ from the Cargo package versions embedded in
+that source, so inspect the tagged `Cargo.toml` or `cargo metadata` output before treating a tag as a crate version.
 
-| Channel | Latest known version represented by this documentation | Notes |
-| --- | --- | --- |
-| SDK on crates.io | `0.4.2` | Recommended SDK dependency. |
-| CLI on crates.io | `0.4.1` | Recommended `cargo install` source. |
-| GitHub release | `v0.4.3` | Contains CLI assets, but the tagged workspace reports package version `0.4.2`. |
-| Current source | workspace `0.4.2` | Declares MSRV 1.96.0. |
-
-Treat a GitHub release tag as a source/artifact identifier, not proof of the embedded Cargo package version. For source
-dependencies, pin a reviewed full commit SHA. For release binaries, verify the adjacent SHA-256 file before use.
+For source dependencies, pin a reviewed full commit SHA. For release binaries, verify the adjacent SHA-256 file before
+use.
 
 ## Development
 

@@ -1,8 +1,8 @@
 //! Compile-checked illustration of the retained legacy Remote MCP API shape.
 //!
-//! This does not make an MCP request. `AtlassianRemoteClient` 0.4.2 targets the
-//! retired `/v1/sse` endpoint and is not compatible with Atlassian's current Rovo
-//! MCP service. Use this example only when assessing migration of existing code.
+//! This does not make an MCP request. `AtlassianRemoteClient` targets the retired
+//! `/v1/sse` endpoint and is not compatible with Atlassian's current Rovo MCP
+//! service. Use this example only when assessing migration of existing code.
 
 use std::env;
 use threatflux_atlassian_sdk::AtlassianRemoteClient;

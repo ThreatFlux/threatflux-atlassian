@@ -14,7 +14,7 @@ environment-driven configuration, and helpers used by the ThreatFlux Atlassian C
 > This independent project is not affiliated with, endorsed by, or sponsored by Atlassian.
 
 > [!WARNING]
-> Do not use `AtlassianRemoteClient` for a new integration. Version 0.4.2 hard-codes Atlassian's retired
+> Do not use `AtlassianRemoteClient` for a new integration. It hard-codes Atlassian's retired
 > `https://mcp.atlassian.com/v1/sse` endpoint; Atlassian stopped supporting that endpoint after June 30, 2026. The
 > module also does not implement the current Streamable HTTP transport or host an OAuth callback server. Read
 > [Legacy Remote MCP](#legacy-remote-mcp) and [Atlassian's migration notice](https://support.atlassian.com/atlassian-rovo-mcp-server/docs/configuring-oauth-2-1/).
@@ -36,19 +36,12 @@ Management, Confluence, Compass, or the current Atlassian Rovo MCP protocol.
 ## Installation
 
 ```bash
-cargo add threatflux-atlassian-sdk@0.4.2
+cargo add threatflux-atlassian-sdk
 cargo add tokio --features macros,rt-multi-thread
 ```
 
-Equivalent `Cargo.toml`:
-
-```toml
-[dependencies]
-threatflux-atlassian-sdk = "0.4.2"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-```
-
-The current repository source declares Rust 1.96.0 as its minimum supported Rust version (MSRV).
+This resolves the latest published [SDK crate](https://crates.io/crates/threatflux-atlassian-sdk). The current repository
+source declares Rust 1.96.0 as its minimum supported Rust version (MSRV).
 
 ## Quickstart
 
@@ -117,7 +110,7 @@ explicit configuration.
 | `JIRA_TIMEOUT` | No | `60` | Seconds; an invalid integer is an error. |
 | `JIRA_CERT_PATH` | No | — | One PEM or DER certificate added as a root. |
 | `JIRA_VERIFY_SSL` | No | `true` | Only case-insensitive `false` disables verification. |
-| `JIRA_MAX_RETRIES` | No | `3` | Stored but not executed automatically in 0.4.2; invalid values are ignored. |
+| `JIRA_MAX_RETRIES` | No | `3` | Stored but not executed automatically; invalid values are ignored. |
 
 The default retry delay is one second and can be changed only through the builder or `with_retries`; it is also stored
 but not executed by the request path. The client disables system proxy discovery, so proxy environment variables are
@@ -131,7 +124,7 @@ The current flags preserve package compatibility but do not gate code or depende
 behavior. Certificate verification is controlled at runtime by `AtlassianConfig`.
 
 <!-- BEGIN FEATURES -->
-| Feature | Enabled by | Current 0.4.2 behavior |
+| Feature | Enabled by | Behavior |
 | --- | --- | --- |
 | `default` | Cargo default | Enables `full`. |
 | `full` | `default` | Enables the `direct` and `remote` marker features. |
@@ -150,8 +143,8 @@ All public operations return `threatflux_atlassian_sdk::Result<T>` with `Atlassi
 - `is_retryable()` recognizes `RateLimit`, `Timeout`, and `Http` errors with status 500 or greater. A Jira 5xx response
   mapped to `JiraApi` is not classified as retryable by that helper.
 
-No SDK method automatically retries, sleeps, or honors `Retry-After` in 0.4.2. Apply bounded exponential backoff with
-jitter in the calling application, and only retry operations whose idempotency you understand.
+No SDK method automatically retries, sleeps, or honors `Retry-After`. Apply bounded exponential backoff with jitter in
+the calling application, and only retry operations whose idempotency you understand.
 
 ## TLS and Proxy Behavior
 

@@ -34,7 +34,7 @@
 //!
 //! [`AtlassianConfig`] defaults to a 60-second timeout, TLS certificate verification,
 //! three stored retry attempts, and a one-second stored retry delay. The retry values
-//! are not executed automatically in version 0.4.2; callers own backoff and write
+//! are not executed automatically; callers own backoff and write
 //! idempotency. A custom PEM or DER root certificate can be added with
 //! [`AtlassianConfig::with_cert_path`].
 //!
@@ -53,8 +53,7 @@
 //! [official migration notice](https://support.atlassian.com/atlassian-rovo-mcp-server/docs/configuring-oauth-2-1/).
 //!
 //! The `direct`, `remote`, and `ssl-verification` Cargo features are compatibility
-//! markers in version 0.4.2 and do not gate modules, dependencies, or runtime TLS
-//! behavior.
+//! markers and do not gate modules, dependencies, or runtime TLS behavior.
 
 #![allow(clippy::all, clippy::pedantic, clippy::nursery)]
 #![warn(missing_docs)]

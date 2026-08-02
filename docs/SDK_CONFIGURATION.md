@@ -1,7 +1,7 @@
 # SDK Configuration Reference
 
-This reference describes the behavior implemented by `threatflux-atlassian-sdk` 0.4.2. It is intentionally narrower
-than Atlassian's full platform: the supported path is direct Jira Cloud REST API v2 access with an account email and API
+This reference describes the behavior implemented by `threatflux-atlassian-sdk`. It is intentionally narrower than
+Atlassian's full platform: the supported path is direct Jira Cloud REST API v2 access with an account email and API
 token.
 
 This independent project is not affiliated with, endorsed by, or sponsored by Atlassian.
@@ -38,7 +38,7 @@ This independent project is not affiliated with, endorsed by, or sponsored by At
 \* `JIRA_USERNAME` and `JIRA_API_TOKEN` can each be supplied through their encrypted alternatives below.
 
 There is no environment variable for `retry_delay`. Set it with `AtlassianConfigBuilder::retries` or
-`AtlassianConfig::with_retries`; this still does not enable automatic retries in 0.4.2.
+`AtlassianConfig::with_retries`; this still does not enable automatic retries.
 
 ## Source Precedence
 
@@ -123,8 +123,8 @@ That limitation cannot be solved by setting proxy environment variables.
 
 ## Retries and Rate Limits
 
-No direct or Remote MCP method automatically retries in 0.4.2. `max_retries` and `retry_delay` are configuration data
-only. A `429` response becomes `AtlassianError::RateLimit`, but the SDK does not parse `Retry-After` or delay the caller.
+No direct or Remote MCP method automatically retries. `max_retries` and `retry_delay` are configuration data only. A
+`429` response becomes `AtlassianError::RateLimit`, but the SDK does not parse `Retry-After` or delay the caller.
 
 Add retry policy in the application layer:
 
