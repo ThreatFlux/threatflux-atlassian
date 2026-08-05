@@ -206,16 +206,14 @@ use.
 
 ## Development
 
-Install `just` 1.45.0 or newer, then run:
-
 ```bash
-just dev-setup
-just docs-check
-just ci
+make dev-setup
+make docs-check
+make ci
 ```
 
 The workspace pins Rust 1.97.1 for development and CI while checking the 1.96.0 MSRV separately. See
-[`justfile`](justfile) for focused formatting, lint, test, feature, rustdoc, security, and packaging recipes.
+[`Makefile`](Makefile) for focused formatting, lint, test, feature, rustdoc, security, and packaging targets.
 
 ## Security
 
