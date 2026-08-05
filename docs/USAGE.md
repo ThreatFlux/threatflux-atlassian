@@ -125,16 +125,16 @@ and `issue-assign KEY --unassign` for their corresponding removal operations.
 
 ## Local Development
 
-The repo keeps the standard ThreatFlux Rust template tooling. Install `just` 1.45.0 or newer, then run:
+The repo keeps the standard ThreatFlux Rust template tooling:
 
 ```bash
-just dev-setup
-just docs-check
-just fmt
-just lint
-just test
-just sbom
-just ci
+make dev-setup
+make docs-check
+make fmt
+make lint
+make test
+make sbom
+make ci
 ```
 
 ## Release Notes

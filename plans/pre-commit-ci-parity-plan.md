@@ -56,8 +56,8 @@ Mirror the broader CI and security signal that commonly breaks PRs:
 
 ## Files To Modify
 
-- `justfile`
-  - add `pre-commit`, `pre-push`, and `ci-parity` recipes
+- `Makefile`
+  - add `pre-commit`, `pre-push`, and `ci-parity` targets
 - `README.md`
   - add a short local quality gate section
 - `docs/internal/MAINTAINER_GUIDE.md`
@@ -65,7 +65,7 @@ Mirror the broader CI and security signal that commonly breaks PRs:
 
 ## Proposed Commands
 
-### `just pre-commit`
+### `make pre-commit`
 
 Run:
 
@@ -84,12 +84,12 @@ cargo +1.97.1 clippy --all-features --all-targets -- \
 actionlint
 ```
 
-### `just pre-push`
+### `make pre-push`
 
 Run:
 
 ```bash
-just pre-commit
+make pre-commit
 cargo +1.97.1 test --workspace --all-features
 cargo +1.97.1 test --doc --all-features
 cargo +1.97.1 check --workspace --no-default-features
@@ -120,7 +120,7 @@ cargo +1.96.0 deny check licenses advisories bans sources
 ## Optional Follow-Ups
 
 - Add changed-file awareness so docs-only changes can skip Rust-heavy checks.
-- Add a `just fix` recipe that runs `cargo fmt --all` before `pre-commit`.
+- Add a `make fix` target that runs `cargo fmt --all` before `pre-commit`.
 - Add a dedicated `cargo llvm-cov` target for action-crate coverage enforcement if we decide to gate minimum coverage in CI.
 - Add `shellcheck` once the repo has more shell surface area.
 
@@ -128,14 +128,14 @@ cargo +1.96.0 deny check licenses advisories bans sources
 
 After implementation:
 
-1. Intentionally introduce formatting drift and confirm `just pre-commit` fails.
-2. Intentionally introduce a clippy lint and confirm `just pre-commit` fails.
+1. Intentionally introduce formatting drift and confirm `make pre-commit` fails.
+2. Intentionally introduce a clippy lint and confirm `make pre-commit` fails.
 3. Intentionally break a workflow file and confirm `actionlint` fails locally.
-4. Run `just pre-push` and confirm it passes on a clean branch.
+4. Run `make pre-push` and confirm it passes on a clean branch.
 5. Verify the commands match the current CI workflow definitions after any workflow edits.
 
 ## Success Criteria
 
-- A developer can run `just pre-commit` and catch the same failures that block `Quick Check`.
-- A developer can run `just pre-push` and catch the common workspace-wide failures before opening or updating a PR.
+- A developer can run `make pre-commit` and catch the same failures that block `Quick Check`.
+- A developer can run `make pre-push` and catch the common workspace-wide failures before opening or updating a PR.
 - Maintainer docs clearly describe when to use each command and how they map to GitHub Actions.
