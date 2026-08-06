@@ -171,10 +171,12 @@ async fn execute_rule(
             let existing = client_ref.search_issues(&jql, 0, 1).await?;
             Ok(existing.issues.first().map(|issue| issue.key.clone()))
         },
-        |request| async move {
-            let issue = client_ref.create_issue(request).await?;
-            Ok(issue.key)
-        },
+        // The create-only call, not `create_issue`: this closure needs the key
+        // and nothing else, and `create_issue` reads the issue back afterwards,
+        // so a failure of that second round trip would return an error for an
+        // issue Jira already has -- past the point of no return, and before
+        // `write_outputs` publishes the key.
+        |request| async move { Ok(client_ref.create_issue_key(request).await?) },
     )
     .await
 }
@@ -216,7 +218,9 @@ fn write_outputs(outcome: &ActionOutcome) -> Result<()> {
 /// Writes the five step outputs, skipping any one value the encoder refuses.
 ///
 /// This runs after the Jira create or dedupe, which is irreversible and whose
-/// issue key is already known, so an output that cannot be encoded may cost that
+/// issue key is already known: the create is one round trip and the key comes
+/// back in its own response, so no call made after the issue exists can take the
+/// key away again. An output that cannot be encoded may therefore cost that
 /// output and nothing else. Failing here would report a reconciliation that
 /// succeeded as a red step, and would take with it every output already written
 /// -- the issue key above all, which the caller then has no way to learn. So
@@ -288,6 +292,7 @@ mod tests {
     use threatflux_atlassian_testkit::env::EnvGuard;
     use threatflux_atlassian_testkit::fixtures;
     use threatflux_atlassian_testkit::gha::github_output_map;
+    use threatflux_atlassian_testkit::jira_mock::{JiraMock, Step};
     use threatflux_atlassian_testkit::logs;
 
     /// Reads `GITHUB_OUTPUT` back through the runner's own grammar.
@@ -323,6 +328,7 @@ mod tests {
         "JIRA_EMAIL",
         "JIRA_USERNAME",
         "JIRA_API_TOKEN",
+        "JIRA_VERIFY_SSL",
     ];
 
     /// Sets the inputs exactly as the GitHub runner does: `INPUT_` + the
@@ -743,6 +749,72 @@ mod tests {
             "GITHUB_OUTPUT",
         ]);
         clear_test_jira_hook();
+    }
+
+    /// The Jira endpoints one reconciliation touches, in the order it touches
+    /// them. The third is the one a create must never depend on.
+    const SEARCH_ENDPOINT: &str = "/rest/api/2/search";
+    const CREATE_ENDPOINT: &str = "/rest/api/2/issue";
+    const READBACK_ENDPOINT: &str = "/rest/api/2/issue/KAN-77";
+
+    #[tokio::test]
+    #[serial]
+    async fn run_from_env_publishes_the_key_of_a_created_issue_the_api_will_not_read_back() {
+        // The create POST is the irreversible half and it answers with the key,
+        // so nothing after it may cost the run that key. Reading the created
+        // issue back turned any transient 5xx on the *second* round trip -- or a
+        // token that can create but not read -- into a red step that published
+        // no outputs at all: a live Jira issue whose key the workflow has no way
+        // to learn. This runs against a real client and a real socket rather
+        // than the test hook, because the round trip that used to be there is
+        // exactly what is under test.
+        let mock = JiraMock::start().await;
+        mock.stub(
+            "GET",
+            SEARCH_ENDPOINT,
+            Step::json_str(200, fixtures::jira_body("search-empty")),
+        )
+        .await;
+        mock.stub(
+            "POST",
+            CREATE_ENDPOINT,
+            Step::json_str(201, fixtures::jira_body("create-issue-response")),
+        )
+        .await;
+        mock.stub("GET", READBACK_ENDPOINT, Step::status(503)).await;
+
+        let temp_root = unique_temp_dir("threatflux-atlassian-action");
+        fs::create_dir_all(&temp_root).expect("temp dir should be created");
+
+        let config_path = temp_root.join("jira-automation.yml");
+        let event_path = temp_root.join("event.json");
+        let output_path = temp_root.join("github-output.txt");
+
+        write_standard_config(&config_path);
+        write_matching_event(&event_path, "Severity: high\nPackage: foo");
+        clear_test_jira_hook();
+
+        let mut guard = EnvGuard::new();
+        set_runner_inputs(&mut guard, &config_path, &event_path, &output_path, "false");
+        guard
+            .set("JIRA_BASE_URL", mock.uri())
+            .set("JIRA_EMAIL", "action@example.com")
+            .set("JIRA_API_TOKEN", "test-token")
+            // The mock listens on http, and the client refuses a non-https base
+            // URL while it verifies certificates.
+            .set("JIRA_VERIFY_SSL", "false");
+
+        let outcome = run_from_env()
+            .await
+            .expect("an issue Jira created must not be reported as a failed step");
+        let output = output_map(&output_path);
+
+        assert!(outcome.created);
+        assert_eq!(outcome.jira_issue_key.as_deref(), Some("KAN-77"));
+        assert_eq!(output["jira-issue-key"], "KAN-77");
+        assert_eq!(output["created"], "true");
+        mock.assert_call_count("POST", CREATE_ENDPOINT, 1).await;
+        mock.assert_call_count("GET", READBACK_ENDPOINT, 0).await;
     }
 
     /// A consumer config whose severity capture is deliberately unconstrained.

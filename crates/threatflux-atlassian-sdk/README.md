@@ -82,7 +82,7 @@ when designing a distributable integration.
 
 | Area | Methods |
 | --- | --- |
-| Issues | `get_issue`, `create_issue`, `update_issue`; `get_project_issues` uses the legacy issue-search route |
+| Issues | `get_issue`, `create_issue_key`, `create_issue` (creates, then reads the issue back), `update_issue`; `get_project_issues` uses the legacy issue-search route |
 | Search | `search_issues` uses an upstream-deprecated route; `search_users` |
 | Comments and history | `add_issue_comment`, `get_issue_comments`, `get_issue_changelog` |
 | Assignment and links | `assign_issue`, `create_issue_link`, `delete_issue_link` |

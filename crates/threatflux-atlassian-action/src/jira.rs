@@ -19,9 +19,14 @@ pub fn build_create_issue_request(
         .get(&rule_match.severity)
         .cloned()
         .ok_or_else(|| {
+            // Previewed rather than echoed: this error is returned from `main`
+            // and printed into the step log, and under a permissive consumer
+            // regex the severity is whatever the issue body put in the capture
+            // -- unbounded, and free to carry the newline a `::error::` needs to
+            // be read as a workflow command.
             anyhow::anyhow!(
-                "No Jira priority mapping for severity '{}'",
-                rule_match.severity
+                "No Jira priority mapping for severity {}",
+                crate::output::preview(&rule_match.severity)
             )
         })?;
     let summary = render_template(&rule.jira.summary, event, rule_match)?;
@@ -267,6 +272,77 @@ mod tests {
         let error = build_create_issue_request(&config.rules[0], &event, &matched)
             .expect_err("missing priority mapping should fail");
         assert!(error.to_string().contains("No Jira priority mapping"));
+    }
+
+    /// A consumer config whose severity capture is deliberately unconstrained.
+    ///
+    /// `(?s)` makes `.` match a newline, so capture group 1 is whatever the
+    /// issue body puts between the markers: up to the whole body, newlines and
+    /// control characters included. This is the configuration shape the threat
+    /// model is built on, and the severity it yields is the key
+    /// `priority_by_severity` is looked up by.
+    const PERMISSIVE_SEVERITY_CONFIG: &str = r"
+version: 1
+rules:
+  - id: permissive-severity-capture
+    when:
+      event: issues
+      action: opened
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?s)<severity>(.*)</severity>'
+    jira:
+      project_key: KAN
+      issue_type: Bug
+      priority_by_severity:
+        high: High
+      summary: test
+      description: test
+      dedupe:
+        strategy: sha256
+        fields: [repository.full_name, issue.title]
+";
+
+    #[test]
+    fn a_missing_priority_mapping_does_not_render_the_body_it_read_the_severity_from() {
+        // This error is returned from `main`, so it is printed into the step
+        // log. Under a permissive capture the severity is body text an issue
+        // author chose, up to the ~64 KiB GitHub accepts, so interpolating it
+        // raw published an unbounded value and let a `\n::error::` reach the log
+        // as the start of a line, which is where the runner reads a workflow
+        // command.
+        let config = load_config_from_str(PERMISSIVE_SEVERITY_CONFIG).expect("config should load");
+        let rule = &config.rules[0];
+        let padding = "a".repeat(4096);
+        let event = event_with_body(&format!(
+            "<severity>high\n::error::forged{padding}::end-of-payload</severity>"
+        ));
+        let matched = evaluate_rule(rule, &event)
+            .expect("rule evaluation should succeed")
+            .expect("rule should match");
+
+        let error = build_create_issue_request(rule, &event, &matched)
+            .expect_err("the captured severity is not in the mapping");
+        let rendered = format!("{error:#}");
+
+        assert!(
+            rendered.len() < 200,
+            "the error is unbounded ({} bytes): {rendered}",
+            rendered.len()
+        );
+        assert!(
+            !rendered.contains("::end-of-payload"),
+            "the end of the body reached the error: {rendered}"
+        );
+        assert!(
+            !rendered.contains('\n') && !rendered.contains('\r'),
+            "a body newline reached the error: {rendered}"
+        );
+        assert!(
+            rendered.contains("No Jira priority mapping"),
+            "the error stopped naming its failure: {rendered}"
+        );
     }
 
     /// A consumer config that lifts a whole `Severity:` line off the body.
