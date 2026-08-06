@@ -88,8 +88,12 @@ EXCERPT_LIMIT = 120
 # Requiring whitespace matched only the first two, so the `=` form suppressed silently.
 # `--cap-lints` is matched whatever its argument: it caps every lint at the given
 # level, so it overrides the manifest without ever naming a Clippy lint to match on.
+# `--force-warn` is the highest-priority level rustc has: it demotes a denied lint to
+# a warning and, unlike `-A`, a later `-D warnings` does not take it back. It shares
+# no prefix with `--forbid` or `--warn`, so nothing here matched it and
+# `cargo clippy -- -D warnings --force-warn clippy::all` exited 0 over offending code.
 COMMAND_LINE_LINT_RE = re.compile(
-    r"-(?:-warn|-allow|-deny|-forbid|[WADF])[\s=]*clippy::[\w:]+"
+    r"-(?:-warn|-allow|-deny|-forbid|-force-warn|[WADF])[\s=]*clippy::[\w:]+"
     r"|--cap-lints[\s=]*[\w-]+"
 )
 
@@ -778,6 +782,20 @@ def self_test() -> int:
         ["--cap-lints=warn"],
         "the = spelling of --cap-lints must be detected",
     )
+    # `--force-warn` outranks every other level, so a trailing `-D warnings` does not
+    # take it back: this is the one flag that demotes a denied lint and cannot be
+    # re-tightened afterwards. It shares no prefix with `--forbid` or `--warn`, so
+    # nothing in the old pattern matched it and the whole strict job went vacuous.
+    expect(
+        find_command_line_lint_flags("cargo clippy -- --force-warn clippy::all") ==
+        ["--force-warn clippy::all"],
+        "--force-warn outranks a later deny and must be detected",
+    )
+    expect(
+        find_command_line_lint_flags("cargo clippy -- --force-warn=clippy::pedantic") ==
+        ["--force-warn=clippy::pedantic"],
+        "the = spelling of --force-warn must be detected",
+    )
     expect(
         find_command_line_lint_flags("cargo clippy -- -D warnings") == [],
         "-D warnings is a rustc level, not a Clippy lint level",
@@ -843,6 +861,11 @@ def self_test() -> int:
         '[build]\nrustflags = ["--cap-lints", "allow"]\n',
         ["--cap-lints allow"],
         "--cap-lints in rustflags must be detected",
+    )
+    expect_config(
+        '[build]\nrustflags = ["--force-warn", "clippy::all"]\n',
+        ["--force-warn clippy::all"],
+        "--force-warn in rustflags must be detected",
     )
     # Only the raw-text pass can see this: no rustflags key is involved.
     expect_config(

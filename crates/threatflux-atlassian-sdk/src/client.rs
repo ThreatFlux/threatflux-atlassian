@@ -411,7 +411,81 @@ impl AtlassianClient {
         Ok(response.json().await?)
     }
 
-    /// Create a new issue
+    /// Create a new issue and return the key Jira assigned it
+    ///
+    /// One round trip, and the key comes back in the create response itself, so
+    /// nothing that can fail happens between the issue existing and the caller
+    /// holding its key. [`create_issue`](Self::create_issue) reads the created
+    /// issue back for its fields and can therefore fail *after* the create
+    /// succeeded, which leaves an issue live in Jira and returns no key for it;
+    /// a caller that only needs the key -- to publish it, link it or log it --
+    /// uses this and cannot lose it to a transient 5xx or to a token that may
+    /// create but not read.
+    ///
+    /// # Arguments
+    /// * `request` - Issue creation request with all required fields
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// use threatflux_atlassian_sdk::{AtlassianClient, CreateIssueRequest, CreateIssueFields};
+    /// use threatflux_atlassian_sdk::{ProjectReference, IssueTypeReference};
+    /// use std::collections::HashMap;
+    ///
+    /// # tokio_test::block_on(async {
+    /// # let client = AtlassianClient::from_env().unwrap();
+    /// # let request = CreateIssueRequest {
+    /// #     fields: CreateIssueFields {
+    /// #         project: ProjectReference::by_key("TEST"),
+    /// #         summary: "New issue".to_string(),
+    /// #         issue_type: IssueTypeReference::by_name("Task"),
+    /// #         description: None,
+    /// #         assignee: None,
+    /// #         priority: None,
+    /// #         labels: None,
+    /// #         components: None,
+    /// #         parent: None,
+    /// #         custom_fields: HashMap::new(),
+    /// #     },
+    /// # };
+    /// let issue_key = client.create_issue_key(request).await.unwrap();
+    /// println!("created {issue_key}");
+    /// # });
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if Jira rejects the create, or if Jira accepts it and
+    /// its response cannot be read. Only the first means no issue was made: an
+    /// unreadable response leaves an issue whose key nothing learned, which a
+    /// retry would duplicate, so that case is logged.
+    pub async fn create_issue_key(&self, request: CreateIssueRequest) -> Result<String> {
+        info!("Creating new issue: {}", request.fields.summary);
+
+        let endpoint = "/rest/api/2/issue";
+        let body = serde_json::to_value(&request)?;
+
+        let response = self
+            .make_request(Method::POST, endpoint, Some(&body), None)
+            .await?;
+
+        let created_issue: CreateIssueResponse =
+            response.json().await.inspect_err(|error| {
+                error!("Jira accepted the create but its response could not be read, so the created issue has no key here: {error}");
+            })?;
+        info!("Successfully created issue: {}", created_issue.key);
+
+        Ok(created_issue.key)
+    }
+
+    /// Create a new issue and read it back
+    ///
+    /// The returned issue is the one Jira stored, with the fields it derived --
+    /// id, status, project -- which the create response does not carry. That
+    /// second round trip can fail on its own, and then this returns an error for
+    /// an issue that exists. The returned error does not carry the key; the key
+    /// is logged at `ERROR` level, which is enough to find the issue by hand but
+    /// not to act on. A caller that needs the key in code uses
+    /// [`create_issue_key`](Self::create_issue_key), which cannot fail that way.
     ///
     /// # Arguments
     /// * `request` - Issue creation request with all required fields
@@ -443,19 +517,11 @@ impl AtlassianClient {
     /// # });
     /// ```
     pub async fn create_issue(&self, request: CreateIssueRequest) -> Result<JiraIssue> {
-        info!("Creating new issue: {}", request.fields.summary);
+        let issue_key = self.create_issue_key(request).await?;
 
-        let endpoint = "/rest/api/2/issue";
-        let body = serde_json::to_value(&request)?;
-
-        let response = self
-            .make_request(Method::POST, endpoint, Some(&body), None)
-            .await?;
-
-        let created_issue: CreateIssueResponse = response.json().await?;
-        info!("Successfully created issue: {}", created_issue.key);
-
-        self.get_issue(&created_issue.key).await
+        self.get_issue(&issue_key).await.inspect_err(|error| {
+            error!("Issue {issue_key} was created but could not be read back: {error}");
+        })
     }
 
     /// Search for issues using JQL through Jira's legacy GET search route.
@@ -1104,6 +1170,95 @@ mod tests {
 
         assert_eq!(created_issue.key, "TEST-123");
         assert_eq!(created_issue.fields.summary, "Created issue");
+    }
+
+    #[tokio::test]
+    async fn test_create_issue_key_returns_the_key_without_reading_the_issue_back() {
+        // The POST is irreversible and answers with the key, so a caller that
+        // wants only the key may not be made to depend on a second round trip:
+        // a 503, a 429 or a token that can create but not read would otherwise
+        // discard the key of an issue that exists.
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/rest/api/2/issue"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+                "id": "10077",
+                "key": "KAN-77",
+                "self": format!("{}/rest/api/2/issue/10077", server.uri()),
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/rest/api/2/issue/KAN-77"))
+            .respond_with(ResponseTemplate::new(503))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let client = create_mock_client(&server);
+        let request = CreateIssueRequest {
+            fields: CreateIssueFields {
+                project: ProjectReference::by_key("KAN"),
+                summary: "Created issue".to_string(),
+                issue_type: IssueTypeReference::by_name("Bug"),
+                description: None,
+                assignee: None,
+                priority: None,
+                labels: None,
+                components: None,
+                parent: None,
+                custom_fields: HashMap::new(),
+            },
+        };
+
+        let issue_key = client
+            .create_issue_key(request)
+            .await
+            .expect("a created issue must yield its key");
+
+        assert_eq!(issue_key, "KAN-77");
+    }
+
+    #[tokio::test]
+    async fn test_create_issue_key_reports_a_create_response_it_cannot_read() {
+        // The one error this method can return *after* Jira made the issue, and
+        // the reason its documented boundary is "a rejected create made no
+        // issue" rather than "an error means no issue": a 2xx whose body does
+        // not carry a key leaves an issue behind that a retry would duplicate.
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/rest/api/2/issue"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({ "id": "10077" })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = create_mock_client(&server);
+        let request = CreateIssueRequest {
+            fields: CreateIssueFields {
+                project: ProjectReference::by_key("KAN"),
+                summary: "Created issue".to_string(),
+                issue_type: IssueTypeReference::by_name("Bug"),
+                description: None,
+                assignee: None,
+                priority: None,
+                labels: None,
+                components: None,
+                parent: None,
+                custom_fields: HashMap::new(),
+            },
+        };
+
+        let error = client
+            .create_issue_key(request)
+            .await
+            .expect_err("a create response without a key cannot yield one");
+
+        assert!(matches!(error, AtlassianError::Http { .. }), "{error:?}");
     }
 
     #[tokio::test]
