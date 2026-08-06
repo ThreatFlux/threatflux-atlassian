@@ -117,7 +117,7 @@ pub enum AtlassianError {
 impl AtlassianError {
     /// Create a new HTTP error
     pub fn http(message: impl Into<String>, status_code: Option<u16>) -> Self {
-        AtlassianError::Http {
+        Self::Http {
             message: message.into(),
             status_code,
         }
@@ -125,28 +125,28 @@ impl AtlassianError {
 
     /// Create a new authentication error
     pub fn auth(message: impl Into<String>) -> Self {
-        AtlassianError::Authentication {
+        Self::Authentication {
             message: message.into(),
         }
     }
 
     /// Create a new parse error
     pub fn parse(message: impl Into<String>) -> Self {
-        AtlassianError::Parse {
+        Self::Parse {
             message: message.into(),
         }
     }
 
     /// Create a new configuration error
     pub fn config(message: impl Into<String>) -> Self {
-        AtlassianError::Configuration {
+        Self::Configuration {
             message: message.into(),
         }
     }
 
     /// Create a new Jira API error
     pub fn jira_api(message: impl Into<String>, code: Option<i32>) -> Self {
-        AtlassianError::JiraApi {
+        Self::JiraApi {
             message: message.into(),
             code,
         }
@@ -154,24 +154,24 @@ impl AtlassianError {
 
     /// Create a new validation error
     pub fn validation(message: impl Into<String>) -> Self {
-        AtlassianError::Validation {
+        Self::Validation {
             message: message.into(),
         }
     }
 
     /// Check if this is a temporary/retryable error
-    pub fn is_retryable(&self) -> bool {
+    pub const fn is_retryable(&self) -> bool {
         matches!(
             self,
-            AtlassianError::Http { status_code: Some(code), .. } if *code >= 500,
-        ) || matches!(self, AtlassianError::Timeout { .. })
-            || matches!(self, AtlassianError::RateLimit { .. })
+            Self::Http { status_code: Some(code), .. } if *code >= 500,
+        ) || matches!(self, Self::Timeout { .. })
+            || matches!(self, Self::RateLimit { .. })
     }
 
     /// Get the HTTP status code if available
-    pub fn status_code(&self) -> Option<u16> {
+    pub const fn status_code(&self) -> Option<u16> {
         match self {
-            AtlassianError::Http { status_code, .. } => *status_code,
+            Self::Http { status_code, .. } => *status_code,
             _ => None,
         }
     }
@@ -181,7 +181,7 @@ impl AtlassianError {
 impl From<reqwest::Error> for AtlassianError {
     fn from(err: reqwest::Error) -> Self {
         let status_code = err.status().map(|s| s.as_u16());
-        AtlassianError::Http {
+        Self::Http {
             message: err.to_string(),
             status_code,
         }
@@ -190,7 +190,7 @@ impl From<reqwest::Error> for AtlassianError {
 
 impl From<serde_json::Error> for AtlassianError {
     fn from(err: serde_json::Error) -> Self {
-        AtlassianError::Parse {
+        Self::Parse {
             message: err.to_string(),
         }
     }
@@ -198,7 +198,7 @@ impl From<serde_json::Error> for AtlassianError {
 
 impl From<std::io::Error> for AtlassianError {
     fn from(err: std::io::Error) -> Self {
-        AtlassianError::Io {
+        Self::Io {
             message: err.to_string(),
         }
     }
@@ -206,7 +206,7 @@ impl From<std::io::Error> for AtlassianError {
 
 impl From<url::ParseError> for AtlassianError {
     fn from(err: url::ParseError) -> Self {
-        AtlassianError::Configuration {
+        Self::Configuration {
             message: format!("Invalid URL: {err}"),
         }
     }

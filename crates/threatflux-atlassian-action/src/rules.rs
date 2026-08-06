@@ -1,5 +1,6 @@
 use crate::config::RuleConfig;
 use crate::github::GitHubIssueEvent;
+use crate::output::strip_trailing_carriage_return;
 use anyhow::Result;
 use regex::Regex;
 use sha2::{Digest, Sha256};
@@ -34,11 +35,27 @@ pub fn evaluate_rule(rule: &RuleConfig, event: &GitHubIssueEvent) -> Result<Opti
         return Ok(None);
     };
 
-    let severity = captures
-        .get(1)
-        .map(|value| value.as_str())
-        .unwrap_or_default()
-        .to_lowercase();
+    // The capture is repaired here, where it is made, because every consumer of
+    // the token reads it from this struct: the `priority_by_severity` lookup in
+    // `crate::jira::build_create_issue_request`, the `{{ severity }}` and
+    // `{{ severity_title }}` substitutions rendered into the Jira summary and
+    // description, the returned `ActionOutcome`, and the `severity` step output.
+    // Repairing it only at the output layer left the first of those looking up
+    // `"high\r"` in a config that maps `high`, which failed the run and created
+    // no Jira issue at all. See `crate::output::strip_trailing_carriage_return`
+    // for why exactly one trailing byte is an artifact rather than a value.
+    let severity = strip_trailing_carriage_return(
+        &captures
+            .get(1)
+            .map(|value| value.as_str())
+            .unwrap_or_default()
+            .to_lowercase(),
+    )
+    .to_string();
+    // Checked after the repair: a capture of nothing but a carriage return
+    // carries no severity, and reporting it as a match would publish an empty
+    // `severity` under a matched rule id -- a state a workflow cannot tell from
+    // the empty severity that means no rule matched at all.
     if severity.is_empty() {
         return Ok(None);
     }
@@ -161,59 +178,19 @@ fn title_case(value: &str) -> String {
 }
 
 #[cfg(test)]
-#[allow(clippy::needless_raw_string_hashes)]
 mod tests {
     use super::{evaluate_rule, render_template, title_case, validate_template};
     use crate::config::load_config_from_str;
     use crate::github::load_issue_event_from_str;
+    use threatflux_atlassian_testkit::fixtures;
 
     #[test]
     fn evaluate_rule_extracts_high_severity_and_dedupe_label() {
-        let config = load_config_from_str(
-            r#"
-version: 1
-rules:
-  - id: dependabot-high-issues
-    when:
-      event: issues
-      action: opened
-      actor_in:
-        - dependabot[bot]
-    extract:
-      severity:
-        from: issue.body
-        regex: '(?mi)^severity:\s*(high|critical)\b'
-    jira:
-      project_key: KAN
-      issue_type: Bug
-      assignee_account_id: account-123
-      priority_by_severity:
-        high: High
-        critical: Highest
-      summary: "[Dependabot][{{ severity_title }}] {{ issue.title }}"
-      description: "{{ issue.body }}"
-      labels: [dependabot, security]
-      dedupe:
-        strategy: sha256
-        label_prefix: dependabot-alert
-        fields:
-          - repository.full_name
-          - issue.title
-"#,
-        )
-        .expect("config should load");
+        let config = load_config_from_str(fixtures::action_config("dependabot-high"))
+            .expect("config should load");
         let event = load_issue_event_from_str(
             "issues",
-            r#"{
-  "action": "opened",
-  "issue": {
-    "title": "Bump openssl from 1.0 to 1.1",
-    "body": "Package: openssl\nSeverity: high\nPatched versions: 1.1.1",
-    "html_url": "https://github.com/ThreatFlux/demo/issues/123",
-    "user": { "login": "dependabot[bot]" }
-  },
-  "repository": { "full_name": "ThreatFlux/demo" }
-}"#,
+            fixtures::github_event("issues-opened-dependabot-openssl"),
         )
         .expect("event should parse");
 
@@ -230,47 +207,11 @@ rules:
 
     #[test]
     fn evaluate_rule_skips_non_matching_actor() {
-        let config = load_config_from_str(
-            r#"
-version: 1
-rules:
-  - id: dependabot-high-issues
-    when:
-      event: issues
-      action: opened
-      actor_in:
-        - dependabot[bot]
-    extract:
-      severity:
-        from: issue.body
-        regex: '(?mi)^severity:\s*(high|critical)\b'
-    jira:
-      project_key: KAN
-      issue_type: Bug
-      priority_by_severity:
-        high: High
-      summary: test
-      description: test
-      dedupe:
-        strategy: sha256
-        fields: [issue.title]
-"#,
-        )
-        .expect("config should load");
-        let event = load_issue_event_from_str(
-            "issues",
-            r#"{
-  "action": "opened",
-  "issue": {
-    "title": "Regular issue",
-    "body": "Severity: high",
-    "html_url": "https://github.com/ThreatFlux/demo/issues/456",
-    "user": { "login": "wyatt" }
-  },
-  "repository": { "full_name": "ThreatFlux/demo" }
-}"#,
-        )
-        .expect("event should parse");
+        let config = load_config_from_str(fixtures::action_config("actor-gate-minimal"))
+            .expect("config should load");
+        let event =
+            load_issue_event_from_str("issues", fixtures::github_event("issues-opened-human-high"))
+                .expect("event should parse");
 
         let matched =
             evaluate_rule(&config.rules[0], &event).expect("rule evaluation should succeed");
@@ -279,43 +220,11 @@ rules:
 
     #[test]
     fn render_template_substitutes_known_fields() {
-        let config = load_config_from_str(
-            r#"
-version: 1
-rules:
-  - id: dependabot-high-issues
-    when:
-      event: issues
-      action: opened
-    extract:
-      severity:
-        from: issue.body
-        regex: '(?mi)^severity:\s*(high|critical)\b'
-    jira:
-      project_key: KAN
-      issue_type: Bug
-      priority_by_severity:
-        critical: Highest
-      summary: "[Dependabot][{{ severity_title }}] {{ issue.title }}"
-      description: "{{ repository.full_name }} {{ issue.html_url }} {{ issue.body }}"
-      dedupe:
-        strategy: sha256
-        fields: [repository.full_name, issue.title]
-"#,
-        )
-        .expect("config should load");
+        let config = load_config_from_str(fixtures::action_config("template-render"))
+            .expect("config should load");
         let event = load_issue_event_from_str(
             "issues",
-            r#"{
-  "action": "opened",
-  "issue": {
-    "title": "Bump foo",
-    "body": "Severity: critical",
-    "html_url": "https://github.com/ThreatFlux/demo/issues/1",
-    "user": { "login": "dependabot[bot]" }
-  },
-  "repository": { "full_name": "ThreatFlux/demo" }
-}"#,
+            fixtures::github_event("issues-opened-dependabot-critical"),
         )
         .expect("event should parse");
         let matched = evaluate_rule(&config.rules[0], &event)
@@ -334,43 +243,11 @@ rules:
 
     #[test]
     fn render_template_rejects_unknown_fields() {
-        let config = load_config_from_str(
-            r#"
-version: 1
-rules:
-  - id: dependabot-high-issues
-    when:
-      event: issues
-      action: opened
-    extract:
-      severity:
-        from: issue.body
-        regex: '(?mi)^severity:\s*(high|critical)\b'
-    jira:
-      project_key: KAN
-      issue_type: Bug
-      priority_by_severity:
-        critical: Highest
-      summary: test
-      description: test
-      dedupe:
-        strategy: sha256
-        fields: [repository.full_name, issue.title]
-"#,
-        )
-        .expect("config should load");
+        let config = load_config_from_str(fixtures::action_config("minimal-critical"))
+            .expect("config should load");
         let event = load_issue_event_from_str(
             "issues",
-            r#"{
-  "action": "opened",
-  "issue": {
-    "title": "Bump foo",
-    "body": "Severity: critical",
-    "html_url": "https://github.com/ThreatFlux/demo/issues/1",
-    "user": { "login": "dependabot[bot]" }
-  },
-  "repository": { "full_name": "ThreatFlux/demo" }
-}"#,
+            fixtures::github_event("issues-opened-dependabot-critical"),
         )
         .expect("event should parse");
         let matched = evaluate_rule(&config.rules[0], &event)
@@ -400,43 +277,11 @@ rules:
 
     #[test]
     fn evaluate_rule_returns_none_when_issue_body_is_missing() {
-        let config = load_config_from_str(
-            r#"
-version: 1
-rules:
-  - id: dependabot-high-issues
-    when:
-      event: issues
-      action: opened
-    extract:
-      severity:
-        from: issue.body
-        regex: '(?mi)^severity:\s*(high|critical)\b'
-    jira:
-      project_key: KAN
-      issue_type: Bug
-      priority_by_severity:
-        critical: Highest
-      summary: test
-      description: test
-      dedupe:
-        strategy: sha256
-        fields: [repository.full_name, issue.title]
-"#,
-        )
-        .expect("config should load");
+        let config = load_config_from_str(fixtures::action_config("minimal-critical"))
+            .expect("config should load");
         let event = load_issue_event_from_str(
             "issues",
-            r#"{
-  "action": "opened",
-  "issue": {
-    "title": "Bump foo",
-    "body": null,
-    "html_url": "https://github.com/ThreatFlux/demo/issues/1",
-    "user": { "login": "dependabot[bot]" }
-  },
-  "repository": { "full_name": "ThreatFlux/demo" }
-}"#,
+            fixtures::github_event("issues-opened-dependabot-null-body"),
         )
         .expect("event should parse");
 
@@ -447,43 +292,11 @@ rules:
 
     #[test]
     fn evaluate_rule_returns_none_for_non_matching_action() {
-        let config = load_config_from_str(
-            r#"
-version: 1
-rules:
-  - id: dependabot-high-issues
-    when:
-      event: issues
-      action: edited
-    extract:
-      severity:
-        from: issue.body
-        regex: '(?mi)^severity:\s*(high|critical)\b'
-    jira:
-      project_key: KAN
-      issue_type: Bug
-      priority_by_severity:
-        high: High
-      summary: test
-      description: test
-      dedupe:
-        strategy: sha256
-        fields: [repository.full_name, issue.title]
-"#,
-        )
-        .expect("config should load");
+        let config = load_config_from_str(fixtures::action_config("action-edited"))
+            .expect("config should load");
         let event = load_issue_event_from_str(
             "issues",
-            r#"{
-  "action": "opened",
-  "issue": {
-    "title": "Bump foo",
-    "body": "Severity: high",
-    "html_url": "https://github.com/ThreatFlux/demo/issues/1",
-    "user": { "login": "dependabot[bot]" }
-  },
-  "repository": { "full_name": "ThreatFlux/demo" }
-}"#,
+            fixtures::github_event("issues-opened-dependabot-high"),
         )
         .expect("event should parse");
 
@@ -494,18 +307,32 @@ rules:
 
     #[test]
     fn evaluate_rule_returns_none_for_empty_capture() {
-        let config = load_config_from_str(
-            r#"
+        let config = load_config_from_str(fixtures::action_config("empty-capture-regex"))
+            .expect("config should load");
+        let event = load_issue_event_from_str(
+            "issues",
+            fixtures::github_event("issues-opened-dependabot-high"),
+        )
+        .expect("event should parse");
+
+        let matched =
+            evaluate_rule(&config.rules[0], &event).expect("rule evaluation should succeed");
+        assert!(matched.is_none());
+    }
+
+    /// A consumer config whose severity capture is deliberately unconstrained,
+    /// so that the capture can be made to be exactly one carriage return.
+    const PERMISSIVE_SEVERITY_CONFIG: &str = r"
 version: 1
 rules:
-  - id: dependabot-high-issues
+  - id: permissive-severity-capture
     when:
       event: issues
       action: opened
     extract:
       severity:
         from: issue.body
-        regex: '(?mi)^severity:\s*()'
+        regex: '(?s)<severity>(.*)</severity>'
     jira:
       project_key: KAN
       issue_type: Bug
@@ -516,27 +343,76 @@ rules:
       dedupe:
         strategy: sha256
         fields: [repository.full_name, issue.title]
-"#,
-        )
-        .expect("config should load");
+";
+
+    fn evaluate_over_body(config_yaml: &str, body: &str) -> Option<super::RuleMatch> {
+        let config = load_config_from_str(config_yaml).expect("config should load");
         let event = load_issue_event_from_str(
             "issues",
-            r#"{
-  "action": "opened",
-  "issue": {
-    "title": "Bump foo",
-    "body": "Severity: high",
-    "html_url": "https://github.com/ThreatFlux/demo/issues/1",
-    "user": { "login": "dependabot[bot]" }
-  },
-  "repository": { "full_name": "ThreatFlux/demo" }
-}"#,
+            &fixtures::github_event_with_issue_body("issues-opened-dependabot-high", body),
         )
         .expect("event should parse");
 
-        let matched =
-            evaluate_rule(&config.rules[0], &event).expect("rule evaluation should succeed");
+        evaluate_rule(&config.rules[0], &event).expect("rule evaluation should succeed")
+    }
+
+    #[test]
+    fn evaluate_rule_repairs_a_crlf_capture_artifact_at_the_capture() {
+        // `(?m)$` ends before a `\n` only and `.` matches a `\r`, so this is what
+        // an ordinary line-anchored config captures out of a CRLF-authored body.
+        // Every consumer of the token reads it from here -- the priority lookup
+        // first -- so the repair belongs here and not at the output.
+        let matched = evaluate_over_body(
+            r"
+version: 1
+rules:
+  - id: line-anchored-severity-capture
+    when:
+      event: issues
+      action: opened
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(.+)$'
+    jira:
+      project_key: KAN
+      issue_type: Bug
+      priority_by_severity:
+        high: High
+      summary: test
+      description: test
+      dedupe:
+        strategy: sha256
+        fields: [repository.full_name, issue.title]
+",
+            "Severity: high\r\nPackage: foo",
+        )
+        .expect("rule should match");
+
+        assert_eq!(matched.severity, "high");
+        assert_eq!(matched.severity_title, "High");
+    }
+
+    #[test]
+    fn evaluate_rule_returns_none_for_a_capture_that_is_only_a_carriage_return() {
+        // The repair leaves nothing behind, and a rule that matched with an empty
+        // severity would publish a `severity` output no workflow could tell from
+        // the one that means no rule matched at all.
+        let matched = evaluate_over_body(PERMISSIVE_SEVERITY_CONFIG, "<severity>\r</severity>");
         assert!(matched.is_none());
+    }
+
+    #[test]
+    fn evaluate_rule_keeps_an_interior_carriage_return() {
+        // Only a trailing one is a line-ending artifact. An interior `\r` is part
+        // of the captured value and stays, for the encoder to refuse.
+        let matched = evaluate_over_body(
+            PERMISSIVE_SEVERITY_CONFIG,
+            "<severity>high\rcreated=true</severity>",
+        )
+        .expect("rule should match");
+
+        assert_eq!(matched.severity, "high\rcreated=true");
     }
 
     #[test]

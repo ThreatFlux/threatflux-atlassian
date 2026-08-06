@@ -246,10 +246,10 @@ impl AuthManager {
 
     /// Check if current token is valid and not expired
     pub async fn is_token_valid(&self) -> bool {
-        self.get_access_token().await.map_or(false, |token| {
+        self.get_access_token().await.is_some_and(|token| {
             token
                 .expires_at
-                .map_or(true, |expires_at| chrono::Utc::now() < expires_at)
+                .is_none_or(|expires_at| chrono::Utc::now() < expires_at)
         })
     }
 
@@ -355,7 +355,7 @@ impl AuthorizationProxy {
     pub fn new(oauth_config: OAuthConfig, callback_port: u16) -> Self {
         let auth_manager = Arc::new(AuthManager::new(oauth_config.clone()));
 
-        AuthorizationProxy {
+        Self {
             oauth_config,
             auth_manager,
             callback_port,
@@ -363,6 +363,12 @@ impl AuthorizationProxy {
     }
 
     /// Start the legacy authorization flow and return an auth URL for the caller.
+    // Awaits nothing today, but it is the first half of a published async pair with
+    // `handle_oauth_callback`; dropping `async` would break every caller.
+    #[allow(
+        clippy::unused_async,
+        reason = "published async OAuth flow entry point"
+    )]
     pub async fn start_authorization_flow(&mut self) -> Result<String> {
         info!("Starting OAuth 2.1 authorization flow");
 

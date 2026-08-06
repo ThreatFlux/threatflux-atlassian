@@ -1,0 +1,93 @@
+{
+  "action": "opened",
+  "issue": {
+    "url": "https://api.github.com/repos/ThreatFlux/demo/issues/456",
+    "repository_url": "https://api.github.com/repos/ThreatFlux/demo",
+    "labels_url": "https://api.github.com/repos/ThreatFlux/demo/issues/456/labels{/name}",
+    "comments_url": "https://api.github.com/repos/ThreatFlux/demo/issues/456/comments",
+    "events_url": "https://api.github.com/repos/ThreatFlux/demo/issues/456/events",
+    "html_url": "https://github.com/ThreatFlux/demo/issues/456",
+    "id": 2147000456,
+    "node_id": "I_kwDOI7Vczs5xAAHI",
+    "number": 456,
+    "title": "Regular issue",
+    "user": {
+      "login": "wyatt",
+      "id": 1043211,
+      "node_id": "MDQ6VXNlcjEwNDMyMTE=",
+      "avatar_url": "https://avatars.githubusercontent.com/u/1043211?v=4",
+      "html_url": "https://github.com/wyatt",
+      "type": "User",
+      "site_admin": false
+    },
+    "labels": [],
+    "state": "open",
+    "locked": false,
+    "assignee": null,
+    "assignees": [],
+    "milestone": null,
+    "comments": 0,
+    "created_at": "2026-05-05T08:02:19Z",
+    "updated_at": "2026-05-05T08:02:19Z",
+    "closed_at": null,
+    "author_association": "MEMBER",
+    "active_lock_reason": null,
+    "body": "Severity: high",
+    "reactions": {
+      "url": "https://api.github.com/repos/ThreatFlux/demo/issues/456/reactions",
+      "total_count": 0,
+      "+1": 0,
+      "-1": 0
+    },
+    "timeline_url": "https://api.github.com/repos/ThreatFlux/demo/issues/456/timeline",
+    "performed_via_github_app": null,
+    "state_reason": null
+  },
+  "repository": {
+    "id": 598178766,
+    "node_id": "R_kgDOI7Vczg",
+    "name": "demo",
+    "full_name": "ThreatFlux/demo",
+    "private": false,
+    "owner": {
+      "login": "ThreatFlux",
+      "id": 121938773,
+      "node_id": "O_kgDOB0S51Q",
+      "avatar_url": "https://avatars.githubusercontent.com/u/121938773?v=4",
+      "html_url": "https://github.com/ThreatFlux",
+      "type": "Organization",
+      "site_admin": false
+    },
+    "html_url": "https://github.com/ThreatFlux/demo",
+    "url": "https://api.github.com/repos/ThreatFlux/demo",
+    "description": "Demonstration repository for threatflux-atlassian",
+    "fork": false,
+    "created_at": "2026-01-14T09:12:44Z",
+    "updated_at": "2026-05-02T18:03:11Z",
+    "pushed_at": "2026-05-04T12:38:55Z",
+    "default_branch": "main",
+    "visibility": "public",
+    "archived": false,
+    "disabled": false,
+    "has_issues": true,
+    "open_issues_count": 4
+  },
+  "organization": {
+    "login": "ThreatFlux",
+    "id": 121938773,
+    "node_id": "O_kgDOB0S51Q",
+    "avatar_url": "https://avatars.githubusercontent.com/u/121938773?v=4",
+    "html_url": "https://github.com/ThreatFlux",
+    "type": "Organization",
+    "site_admin": false
+  },
+  "sender": {
+    "login": "wyatt",
+    "id": 1043211,
+    "node_id": "MDQ6VXNlcjEwNDMyMTE=",
+    "avatar_url": "https://avatars.githubusercontent.com/u/1043211?v=4",
+    "html_url": "https://github.com/wyatt",
+    "type": "User",
+    "site_admin": false
+  }
+}

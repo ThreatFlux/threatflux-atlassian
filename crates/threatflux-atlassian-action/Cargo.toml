@@ -10,9 +10,16 @@ homepage.workspace = true
 readme = "README.md"
 keywords = ["jira", "atlassian", "github-actions", "automation", "threatflux"]
 categories = ["development-tools", "command-line-utilities"]
+# Consumed as a container action built from action.Dockerfile, never from the
+# registry: release.yml publishes only the SDK and CLI packages.
+publish = false
 
 [dependencies]
 anyhow.workspace = true
+# The `GITHUB_OUTPUT` heredoc delimiter mixes a per-entry nonce from the OS
+# CSPRNG into its digest, so that the delimiter published next to a value cannot
+# be used to confirm a guess at that value.
+rand.workspace = true
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -25,3 +32,7 @@ tracing-subscriber.workspace = true
 
 [dev-dependencies]
 serial_test.workspace = true
+threatflux-atlassian-testkit = { path = "../threatflux-atlassian-testkit" }
+
+[lints]
+workspace = true

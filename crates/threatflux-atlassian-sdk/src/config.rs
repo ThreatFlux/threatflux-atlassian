@@ -58,19 +58,26 @@ impl AtlassianConfig {
     ///     "your-api-token".to_string()
     /// ).unwrap();
     /// ```
+    // `base_url` is parsed rather than stored, but narrowing it to `&str` would
+    // split the signature of a documented public constructor whose other two
+    // arguments really are consumed.
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "uniform by-value signature on a public constructor"
+    )]
     pub fn new(base_url: String, username: String, api_token: String) -> Result<Self> {
         let parsed_url = Url::parse(&base_url)
             .map_err(|e| AtlassianError::config(format!("Invalid base URL: {e}")))?;
 
-        Ok(AtlassianConfig {
+        Ok(Self {
             base_url: parsed_url,
             username,
             api_token,
-            timeout: Duration::from_secs(60),
+            timeout: Duration::from_mins(1),
             cert_path: None,
             verify_ssl: true,
             max_retries: 3,
-            retry_delay: Duration::from_millis(1000),
+            retry_delay: Duration::from_secs(1),
             user_agent: format!("atlassian-rust-sdk/{}", env!("CARGO_PKG_VERSION")),
         })
     }
@@ -137,30 +144,34 @@ impl AtlassianConfig {
     }
 
     /// Builder pattern for configuration
-    pub fn builder() -> AtlassianConfigBuilder {
+    pub const fn builder() -> AtlassianConfigBuilder {
         AtlassianConfigBuilder::new()
     }
 
     /// Set custom timeout
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+    #[must_use]
+    pub const fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
     }
 
     /// Set custom certificate path
+    #[must_use]
     pub fn with_cert_path(mut self, cert_path: PathBuf) -> Self {
         self.cert_path = Some(cert_path);
         self
     }
 
     /// Disable SSL verification (not recommended for production)
-    pub fn with_ssl_verification(mut self, verify: bool) -> Self {
+    #[must_use]
+    pub const fn with_ssl_verification(mut self, verify: bool) -> Self {
         self.verify_ssl = verify;
         self
     }
 
     /// Set retry configuration
-    pub fn with_retries(mut self, max_retries: u32, delay: Duration) -> Self {
+    #[must_use]
+    pub const fn with_retries(mut self, max_retries: u32, delay: Duration) -> Self {
         self.max_retries = max_retries;
         self.retry_delay = delay;
         self
@@ -238,7 +249,7 @@ fn apply_optional_env_settings(config: &mut AtlassianConfig) -> Result<()> {
     Ok(())
 }
 
-/// Builder for AtlassianConfig
+/// Builder for `AtlassianConfig`
 #[derive(Debug)]
 pub struct AtlassianConfigBuilder {
     base_url: Option<String>,
@@ -253,57 +264,64 @@ pub struct AtlassianConfigBuilder {
 
 impl AtlassianConfigBuilder {
     /// Create a new configuration builder
-    pub fn new() -> Self {
-        AtlassianConfigBuilder {
+    pub const fn new() -> Self {
+        Self {
             base_url: None,
             username: None,
             api_token: None,
-            timeout: Duration::from_secs(60),
+            timeout: Duration::from_mins(1),
             cert_path: None,
             verify_ssl: true,
             max_retries: 3,
-            retry_delay: Duration::from_millis(1000),
+            retry_delay: Duration::from_secs(1),
         }
     }
 
     /// Set the Jira base URL
+    #[must_use]
     pub fn base_url(mut self, url: impl Into<String>) -> Self {
         self.base_url = Some(url.into());
         self
     }
 
     /// Set the username
+    #[must_use]
     pub fn username(mut self, username: impl Into<String>) -> Self {
         self.username = Some(username.into());
         self
     }
 
     /// Set the API token
+    #[must_use]
     pub fn api_token(mut self, token: impl Into<String>) -> Self {
         self.api_token = Some(token.into());
         self
     }
 
     /// Set the request timeout
-    pub fn timeout(mut self, timeout: Duration) -> Self {
+    #[must_use]
+    pub const fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
     }
 
     /// Set the SSL certificate path
+    #[must_use]
     pub fn cert_path(mut self, path: PathBuf) -> Self {
         self.cert_path = Some(path);
         self
     }
 
     /// Set SSL verification
-    pub fn verify_ssl(mut self, verify: bool) -> Self {
+    #[must_use]
+    pub const fn verify_ssl(mut self, verify: bool) -> Self {
         self.verify_ssl = verify;
         self
     }
 
     /// Set retry configuration
-    pub fn retries(mut self, max_retries: u32, delay: Duration) -> Self {
+    #[must_use]
+    pub const fn retries(mut self, max_retries: u32, delay: Duration) -> Self {
         self.max_retries = max_retries;
         self.retry_delay = delay;
         self
@@ -395,7 +413,7 @@ fn load_encrypted_env_file_if_present() -> Result<()> {
         }
     };
 
-    let decrypted = decrypt_secret_for_base("ENV_FILE", ciphertext)?;
+    let decrypted = decrypt_secret_for_base("ENV_FILE", &ciphertext)?;
     dotenvy::from_read_override(decrypted.as_bytes()).map_err(|err| {
         AtlassianError::config(format!(
             "Failed to load decrypted environment file from {source}: {err}"
@@ -406,12 +424,8 @@ fn load_encrypted_env_file_if_present() -> Result<()> {
 }
 
 fn load_required_secret(base: &str) -> Result<String> {
-    match load_secret(base)? {
-        Some(value) => Ok(value),
-        None => Err(AtlassianError::config(format!(
-            "{base} environment variable not set"
-        ))),
-    }
+    load_secret(base)?
+        .ok_or_else(|| AtlassianError::config(format!("{base} environment variable not set")))
 }
 
 fn load_secret(base: &str) -> Result<Option<String>> {
@@ -442,11 +456,11 @@ fn load_secret(base: &str) -> Result<Option<String>> {
         }
     };
 
-    let decrypted = decrypt_secret_for_base(base, ciphertext)?;
+    let decrypted = decrypt_secret_for_base(base, &ciphertext)?;
     Ok(Some(decrypted))
 }
 
-fn decrypt_secret_for_base(base: &str, ciphertext: String) -> Result<String> {
+fn decrypt_secret_for_base(base: &str, ciphertext: &str) -> Result<String> {
     let encrypted_var = format!("{base}_ENCRYPTED");
     let private_key_var = format!("{base}_PRIVATE_KEY");
     let password_var = format!("{base}_PRIVATE_KEY_PASSWORD");
@@ -474,8 +488,8 @@ fn decrypt_secret_for_base(base: &str, ciphertext: String) -> Result<String> {
         )));
     }
 
-    let secret = parse_private_key_secret(private_key_value)
-        .map_err(|err| flux_error_to_config("Failed to parse private key", err))?;
+    let secret = parse_private_key_secret(&private_key_value)
+        .map_err(|err| flux_error_to_config("Failed to parse private key", &err))?;
 
     if secret.is_empty() {
         return Err(AtlassianError::config("Private key secret is empty"));
@@ -501,19 +515,19 @@ fn decrypt_secret_for_base(base: &str, ciphertext: String) -> Result<String> {
     let private_key = if let Some(password) = password {
         let pem = secret
             .as_string()
-            .map_err(|err| flux_error_to_config("Failed to decode private key bytes", err))?;
+            .map_err(|err| flux_error_to_config("Failed to decode private key bytes", &err))?;
         parsing::parse_encrypted_private_key_from_str(&pem, &password)
-            .map_err(|err| flux_error_to_config("Failed to parse encrypted private key", err))?
+            .map_err(|err| flux_error_to_config("Failed to parse encrypted private key", &err))?
     } else {
         secret
             .as_private_key()
-            .map_err(|err| flux_error_to_config("Failed to parse private key", err))?
+            .map_err(|err| flux_error_to_config("Failed to parse private key", &err))?
     };
 
     let cipher = HybridCipher::new(FluxConfig::default());
     let decrypted = cipher
         .decrypt(&private_key, &encrypted_bytes)
-        .map_err(|err| flux_error_to_config("Failed to decrypt secret", err))?;
+        .map_err(|err| flux_error_to_config("Failed to decrypt secret", &err))?;
 
     if decrypted.is_empty() {
         return Err(AtlassianError::config("Decrypted secret is empty"));
@@ -532,18 +546,18 @@ fn decrypt_secret_for_base(base: &str, ciphertext: String) -> Result<String> {
     Ok(trimmed.to_string())
 }
 
-fn flux_error_to_config(context: &str, err: FluxError) -> AtlassianError {
+fn flux_error_to_config(context: &str, err: &FluxError) -> AtlassianError {
     AtlassianError::config(format!("{context}: {err}"))
 }
 
-fn parse_private_key_secret(value: String) -> std::result::Result<EnvSecret, FluxError> {
-    let mut secret = EnvSecret::from_string(value.clone())?;
+fn parse_private_key_secret(value: &str) -> std::result::Result<EnvSecret, FluxError> {
+    let mut secret = EnvSecret::from_string(value.to_string())?;
 
     if secret.format() != SecretFormat::Raw {
         return Ok(secret);
     }
 
-    if let Some(decoded_pem) = decode_private_key_from_base64(&value) {
+    if let Some(decoded_pem) = decode_private_key_from_base64(value) {
         secret = EnvSecret::from_string(decoded_pem)?;
     }
 
@@ -605,6 +619,34 @@ mod tests {
         assert_eq!(config.username, "test@example.com");
         assert_eq!(config.api_token, "test-token");
         assert!(config.verify_ssl);
+    }
+
+    #[test]
+    fn default_timeout_and_retry_delay_are_unit_independent() {
+        // `Duration::from_mins(1)` and `Duration::from_secs(1)` replaced
+        // `from_secs(60)` and `from_millis(1000)`; the documented values are 60
+        // seconds and 1 second, and the units they are spelled in must not matter.
+        let config = AtlassianConfig::new(
+            "https://test.atlassian.net".to_string(),
+            "test@example.com".to_string(),
+            "test-token".to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(config.timeout.as_secs(), 60);
+        assert_eq!(config.retry_delay.as_millis(), 1000);
+        assert_eq!(config.max_retries, 3);
+
+        let built = AtlassianConfig::builder()
+            .base_url("https://test.atlassian.net")
+            .username("test@example.com")
+            .api_token("test-token")
+            .build()
+            .unwrap();
+
+        assert_eq!(built.timeout, config.timeout);
+        assert_eq!(built.retry_delay, config.retry_delay);
+        assert_eq!(built.max_retries, config.max_retries);
     }
 
     #[test]
@@ -692,7 +734,7 @@ mod tests {
     fn test_validation() {
         let config = AtlassianConfig::new(
             "https://test.atlassian.net".to_string(),
-            "".to_string(), // Empty username
+            String::new(), // Empty username
             "test-token".to_string(),
         )
         .unwrap();

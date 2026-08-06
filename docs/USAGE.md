@@ -251,6 +251,14 @@ Interpolation follows shell-style semantics:
 - use `${VAR:-default}` for optional values or defaults
 - `${VAR:-default}` also falls back when GitHub passes an empty string for an unset `vars.*` value
 
+Only an allowlisted name is expanded. `JIRA_PROJECT_KEY`, `JIRA_ASSIGNEE_ACCOUNT_ID` and
+`JIRA_DESCRIPTION` are allowed by default; any other name fails the config load, whether or not the
+variable is set. A workflow opts additional names in by setting
+`THREATFLUX_CONFIG_ENV_ALLOWLIST` to a comma-separated list in the step environment, for example
+`THREATFLUX_CONFIG_ENV_ALLOWLIST: TEAM_LABEL,SERVICE_TIER`. The opt-in lives in the workflow, not in
+the config file, so a config proposed by a pull request cannot widen it. Credential-shaped names such
+as `JIRA_API_TOKEN` or `GITHUB_TOKEN` stay refused even when they are opted in.
+
 ### Action inputs and outputs
 
 Inputs:

@@ -1,5 +1,3 @@
-#![allow(clippy::all, clippy::pedantic, clippy::nursery)]
-
 use serde_json::Value;
 use std::collections::HashMap;
 use threatflux_atlassian_sdk::{AtlassianClient, CreateIssueFields, CreateIssueRequest};
@@ -7,6 +5,7 @@ use threatflux_atlassian_sdk::{IssueTypeReference, ProjectReference, UserReferen
 
 /// Ticket management example demonstrating operations from Python examples
 /// Includes ticket creation, updates, and bulk operations similar to YAML-based workflows
+#[allow(clippy::too_many_lines, reason = "linear end-to-end demo script")]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging

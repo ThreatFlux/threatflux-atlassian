@@ -1,5 +1,3 @@
-#![allow(clippy::all, clippy::pedantic, clippy::nursery)]
-
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -21,7 +19,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::{self, json};
 use threatflux_atlassian_sdk::{
-    AtlassianClient, AtlassianConfig, CreateIssueRequest, JiraField, UpdateIssueRequest,
+    AtlassianClient, AtlassianConfig, CreateIssueRequest, JiraField, JqlBuilder, UpdateIssueRequest,
 };
 use tracing::Level;
 
@@ -251,7 +249,7 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         stdout: bool,
     },
-    /// Encrypt a Jira credential using a FluxEncrypt public key.
+    /// Encrypt a Jira credential using a `FluxEncrypt` public key.
     SecretEncrypt {
         #[arg(long, value_name = "PATH", conflicts_with = "public_key_inline")]
         public_key_path: Option<PathBuf>,
@@ -268,6 +266,9 @@ enum Commands {
     },
 }
 
+// `main` is a flat dispatch table over the subcommand enum; its length tracks the
+// number of subcommands, and splitting it would move code without removing a branch.
+#[allow(clippy::too_many_lines, reason = "subcommand dispatch table")]
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv().ok();
@@ -361,7 +362,7 @@ async fn main() -> Result<()> {
         } => {
             let start_at = start.unwrap_or(0);
             let max_results = limit.unwrap_or(DEFAULT_ISSUE_LIMIT);
-            let jql = format!("project = {}", project);
+            let jql = project_issues_jql(&project)?;
             let results = client
                 .search_issues(&jql, start_at, max_results)
                 .await
@@ -573,7 +574,7 @@ async fn main() -> Result<()> {
             transition_id,
             comment,
         } => {
-            let normalized_comment = normalize_comment(&comment);
+            let normalized_comment = normalize_comment(comment.as_deref());
             let comment_arg = normalized_comment.as_deref();
             let comment_added = normalized_comment.is_some();
 
@@ -653,7 +654,7 @@ fn build_config(cli: &Cli) -> Result<AtlassianConfig> {
     }
 
     if let Some(agent) = &cli.user_agent {
-        config.user_agent = agent.clone();
+        config.user_agent.clone_from(agent);
     }
 
     if cli.insecure {
@@ -749,21 +750,21 @@ fn resolve_secret(
     secret_env: Option<String>,
 ) -> Result<String> {
     if let Some(value) = secret {
-        return normalize_secret(value);
+        return normalize_secret(&value);
     }
 
     if let Some(path) = secret_file {
         let contents = read_text_file(&path, "secret")?;
-        return normalize_secret(contents);
+        return normalize_secret(&contents);
     }
 
     let env_name = secret_env.unwrap_or_else(|| "JIRA_API_TOKEN".to_string());
     let value = env::var(&env_name)
         .with_context(|| format!("failed to read secret from env {env_name}"))?;
-    normalize_secret(value)
+    normalize_secret(&value)
 }
 
-fn normalize_secret(value: String) -> Result<String> {
+fn normalize_secret(value: &str) -> Result<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         bail!("Secret value cannot be empty");
@@ -771,12 +772,20 @@ fn normalize_secret(value: String) -> Result<String> {
     Ok(trimmed.to_string())
 }
 
-fn normalize_comment(comment: &Option<String>) -> Option<String> {
+/// Builds the query behind `project-issues`. Only `issue-search` takes JQL from
+/// the operator; a project key given here is an operand and is escaped as one.
+fn project_issues_jql(project: &str) -> Result<String> {
+    JqlBuilder::new()
+        .eq("project", project)
+        .and_then(JqlBuilder::build)
+        .with_context(|| format!("failed to build a JQL query for project {project}"))
+}
+
+fn normalize_comment(comment: Option<&str>) -> Option<String> {
     comment
-        .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map(|value| value.to_string())
+        .map(std::string::ToString::to_string)
 }
 
 fn read_text_file(path: &PathBuf, purpose: &str) -> Result<String> {
@@ -831,19 +840,60 @@ fn print_json<T: Serialize>(value: &T) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_comment, Cli, Commands};
+    use super::{normalize_comment, normalize_secret, project_issues_jql, Cli, Commands};
     use clap::Parser;
+
+    #[test]
+    fn project_issues_jql_quotes_the_project_key() {
+        assert_eq!(project_issues_jql("KAN").unwrap(), r#"project = "KAN""#);
+    }
+
+    #[test]
+    fn project_issues_jql_keeps_a_hostile_project_key_inside_its_literal() {
+        assert_eq!(
+            project_issues_jql(r#"KAN" OR project = "EVIL"#).unwrap(),
+            r#"project = "KAN\" OR project = \"EVIL""#
+        );
+        assert_eq!(project_issues_jql("KAN\\").unwrap(), r#"project = "KAN\\""#);
+        assert_eq!(
+            project_issues_jql("KAN ORDER BY created DESC").unwrap(),
+            r#"project = "KAN ORDER BY created DESC""#
+        );
+    }
+
+    #[test]
+    fn project_issues_jql_rejects_an_unrepresentable_project_key() {
+        let error = project_issues_jql("KA\0N").expect_err("a NUL has no JQL escape sequence");
+
+        assert!(error.to_string().contains("failed to build a JQL query"));
+        assert!(format!("{error:#}").contains("NUL character"));
+    }
 
     #[test]
     fn normalize_comment_trims_and_keeps_content() {
         let comment = Some("  Ship it  ".to_string());
-        assert_eq!(normalize_comment(&comment), Some("Ship it".to_string()));
+        assert_eq!(
+            normalize_comment(comment.as_deref()),
+            Some("Ship it".to_string())
+        );
     }
 
     #[test]
     fn normalize_comment_filters_empty_strings() {
-        assert_eq!(normalize_comment(&Some("   ".to_string())), None);
-        assert_eq!(normalize_comment(&None), None);
+        assert_eq!(normalize_comment(Some("   ")), None);
+        assert_eq!(normalize_comment(None), None);
+    }
+
+    #[test]
+    fn normalize_secret_trims_surrounding_whitespace() {
+        assert_eq!(normalize_secret("  token  ").unwrap(), "token");
+        assert_eq!(normalize_secret("token\n").unwrap(), "token");
+    }
+
+    #[test]
+    fn normalize_secret_rejects_blank_values() {
+        assert!(normalize_secret("").is_err());
+        assert!(normalize_secret(" \t\n ").is_err());
     }
 
     #[test]

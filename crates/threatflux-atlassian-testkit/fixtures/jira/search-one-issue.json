@@ -1,0 +1,25 @@
+{
+  "expand": "schema,names",
+  "startAt": 0,
+  "maxResults": 50,
+  "total": 1,
+  "issues": [
+    {
+      "id": "10042",
+      "key": "KAN-42",
+      "self": "https://example.atlassian.net/rest/api/3/issue/10042",
+      "fields": {
+        "summary": "[Dependabot][High] Bump openssl from 1.0 to 1.1",
+        "labels": [
+          "dependabot",
+          "security",
+          "dependabot-alert-48fe1f86b5f0"
+        ],
+        "status": {
+          "name": "To Do",
+          "id": "10000"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,106 @@
+{
+  "action": "opened",
+  "issue": {
+    "url": "https://api.github.com/repos/ThreatFlux/demo/issues/1",
+    "repository_url": "https://api.github.com/repos/ThreatFlux/demo",
+    "labels_url": "https://api.github.com/repos/ThreatFlux/demo/issues/1/labels{/name}",
+    "comments_url": "https://api.github.com/repos/ThreatFlux/demo/issues/1/comments",
+    "events_url": "https://api.github.com/repos/ThreatFlux/demo/issues/1/events",
+    "html_url": "https://github.com/ThreatFlux/demo/issues/1",
+    "id": 2147000001,
+    "node_id": "I_kwDOI7Vczs5xAAAB",
+    "number": 1,
+    "title": "Bump foo",
+    "user": {
+      "login": "dependabot[bot]",
+      "id": 49699333,
+      "node_id": "MDM6Qm90NDk2OTkzMzM=",
+      "avatar_url": "https://avatars.githubusercontent.com/in/29110?v=4",
+      "html_url": "https://github.com/apps/dependabot",
+      "type": "Bot",
+      "site_admin": false
+    },
+    "labels": [
+      {
+        "id": 6503048001,
+        "node_id": "LA_kwDOI7Vczs8AAAABghUjQQ",
+        "name": "dependencies",
+        "color": "0366d6",
+        "default": false,
+        "description": "Pull requests that update a dependency file"
+      }
+    ],
+    "state": "open",
+    "locked": false,
+    "assignee": null,
+    "assignees": [],
+    "milestone": null,
+    "comments": 0,
+    "created_at": "2026-05-04T12:41:07Z",
+    "updated_at": "2026-05-04T12:41:07Z",
+    "closed_at": null,
+    "author_association": "NONE",
+    "active_lock_reason": null,
+    "body": "Severity: high\nPackage: foo",
+    "reactions": {
+      "url": "https://api.github.com/repos/ThreatFlux/demo/issues/1/reactions",
+      "total_count": 0,
+      "+1": 0,
+      "-1": 0
+    },
+    "timeline_url": "https://api.github.com/repos/ThreatFlux/demo/issues/1/timeline",
+    "performed_via_github_app": null,
+    "state_reason": null
+  },
+  "repository": {
+    "id": 598178766,
+    "node_id": "R_kgDOI7Vczg",
+    "name": "demo",
+    "full_name": "ThreatFlux/demo",
+    "private": false,
+    "owner": {
+      "login": "ThreatFlux",
+      "id": 121938773,
+      "node_id": "O_kgDOB0S51Q",
+      "avatar_url": "https://avatars.githubusercontent.com/u/121938773?v=4",
+      "html_url": "https://github.com/ThreatFlux",
+      "type": "Organization",
+      "site_admin": false
+    },
+    "html_url": "https://github.com/ThreatFlux/demo",
+    "url": "https://api.github.com/repos/ThreatFlux/demo",
+    "description": "Demonstration repository for threatflux-atlassian",
+    "fork": false,
+    "created_at": "2026-01-14T09:12:44Z",
+    "updated_at": "2026-05-02T18:03:11Z",
+    "pushed_at": "2026-05-04T12:38:55Z",
+    "default_branch": "main",
+    "visibility": "public",
+    "archived": false,
+    "disabled": false,
+    "has_issues": true,
+    "open_issues_count": 4
+  },
+  "organization": {
+    "login": "ThreatFlux",
+    "id": 121938773,
+    "node_id": "O_kgDOB0S51Q",
+    "avatar_url": "https://avatars.githubusercontent.com/u/121938773?v=4",
+    "html_url": "https://github.com/ThreatFlux",
+    "type": "Organization",
+    "site_admin": false
+  },
+  "sender": {
+    "login": "dependabot[bot]",
+    "id": 49699333,
+    "node_id": "MDM6Qm90NDk2OTkzMzM=",
+    "avatar_url": "https://avatars.githubusercontent.com/in/29110?v=4",
+    "html_url": "https://github.com/apps/dependabot",
+    "type": "Bot",
+    "site_admin": false
+  },
+  "installation": {
+    "id": 44182731,
+    "node_id": "MDIzOkludGVncmF0aW9uSW5zdGFsbGF0aW9uNDQxODI3MzE="
+  }
+}

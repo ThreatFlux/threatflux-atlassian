@@ -30,3 +30,7 @@ Thumbs.db
 # Environment
 .env
 .env.local
+
+# Python bytecode from scripts/
+__pycache__/
+*.pyc

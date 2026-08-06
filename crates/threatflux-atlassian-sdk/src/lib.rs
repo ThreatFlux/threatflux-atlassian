@@ -67,7 +67,6 @@
 //! The `direct`, `remote`, and `ssl-verification` Cargo features are compatibility
 //! markers and do not gate modules, dependencies, or runtime TLS behavior.
 
-#![allow(clippy::all, clippy::pedantic, clippy::nursery)]
 #![warn(missing_docs)]
 
 // Re-export main types for convenience
@@ -75,6 +74,7 @@ pub use auth::{AccessToken, AuthManager, AuthorizationResponse, McpAuthHandler, 
 pub use client::AtlassianClient;
 pub use config::{AtlassianConfig, AtlassianConfigBuilder};
 pub use error::{AtlassianError, Result};
+pub use jql::{JqlBuilder, JqlError, JqlOrder};
 pub use remote_client::AtlassianRemoteClient;
 pub use types::*;
 
@@ -83,6 +83,7 @@ pub mod auth;
 pub mod client;
 pub mod config;
 pub mod error;
+pub mod jql;
 pub mod remote_client;
 pub mod types;
 
@@ -96,7 +97,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const API_VERSION: &str = "2";
 
 /// Get SDK version
-pub fn version() -> &'static str {
+pub const fn version() -> &'static str {
     VERSION
 }
 

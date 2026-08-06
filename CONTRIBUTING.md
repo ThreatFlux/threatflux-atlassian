@@ -90,10 +90,23 @@ BREAKING CHANGE: Response now returns objects instead of arrays
 
 ### Clippy Configuration
 
-We use strict clippy settings:
+Lint levels live in `[workspace.lints.clippy]` in the root `Cargo.toml`, and every
+crate opts in with `[lints] workspace = true`. Nothing passes clippy lint levels on
+the command line, and nothing suppresses them at crate level: a
+`#![allow(clippy::...)]` inner attribute outranks any `-D` flag, so one of them
+would silently make CI's lint job pass without checking anything.
 
 ```bash
-cargo clippy -- -D warnings -D clippy::pedantic -D clippy::nursery
+make lint
+```
+
+`scripts/check_lint_config.py` (run by `make lint` and by CI) fails the build if a
+crate-level clippy allow is reintroduced or if the levels are duplicated onto a
+command line. When a lint genuinely does not apply, allow it on the single item it
+applies to, with a `reason`:
+
+```rust
+#[allow(clippy::too_many_lines, reason = "subcommand dispatch table")]
 ```
 
 ## Testing

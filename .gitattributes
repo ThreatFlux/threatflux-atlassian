@@ -1,0 +1,7 @@
+# Fixture payloads are byte-exact. At least one GitHub delivery carries CRLF on
+# purpose, and Windows is in the CI matrix, where core.autocrlf would rewrite
+# line endings on checkout and corrupt the payload before a test ever ran.
+# The second pattern is the one that matches crates/*/fixtures/: a pattern with
+# an interior slash is anchored to the directory holding this file.
+fixtures/** -text
+**/fixtures/** -text

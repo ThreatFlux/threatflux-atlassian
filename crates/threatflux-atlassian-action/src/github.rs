@@ -38,29 +38,43 @@ pub fn load_issue_event_from_str(event_name: &str, payload: &str) -> Result<GitH
 #[cfg(test)]
 mod tests {
     use super::load_issue_event_from_str;
+    use threatflux_atlassian_testkit::fixtures;
 
     #[test]
     fn load_issue_event_parses_dependabot_issue_payload() {
-        let payload = r#"{
-  "action": "opened",
-  "issue": {
-    "title": "Bump openssl from 1.0 to 1.1",
-    "body": "Severity: high\nPackage: openssl",
-    "html_url": "https://github.com/ThreatFlux/demo/issues/123",
-    "user": {
-      "login": "dependabot[bot]"
-    }
-  },
-  "repository": {
-    "full_name": "ThreatFlux/demo"
-  }
-}"#;
+        let payload = fixtures::github_event("issues-opened-dependabot");
 
         let event = load_issue_event_from_str("issues", payload).expect("event should parse");
 
         assert_eq!(event.action, "opened");
         assert_eq!(event.issue.user.login, "dependabot[bot]");
         assert_eq!(event.repository.full_name, "ThreatFlux/demo");
+        assert_eq!(event.issue.title, "Bump openssl from 1.0 to 1.1");
+        assert_eq!(
+            event.issue.html_url,
+            "https://github.com/ThreatFlux/demo/issues/123"
+        );
+        assert!(event
+            .issue
+            .body
+            .as_deref()
+            .is_some_and(|body| body.contains("Severity: high")));
+    }
+
+    #[test]
+    fn load_issue_event_ignores_the_webhook_fields_it_does_not_model_yet() {
+        let payload = fixtures::github_event("issues-opened-dependabot");
+        let raw: serde_json::Value = serde_json::from_str(payload).expect("fixture should parse");
+
+        assert!(raw["issue"]["id"].is_u64());
+        assert!(raw["issue"]["number"].is_u64());
+        assert!(raw["issue"]["node_id"].is_string());
+        assert!(raw["repository"]["id"].is_u64());
+        assert_eq!(raw["sender"]["login"], "dependabot[bot]");
+        assert_eq!(raw["issue"]["state"], "open");
+
+        load_issue_event_from_str("issues", payload)
+            .expect("a full delivery must still parse into the narrow event type");
     }
 
     #[test]

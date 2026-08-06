@@ -60,6 +60,12 @@ multiple-versions = "warn"
 # Wildcards in version specs
 wildcards = "warn"
 
+# A path dependency on an unpublished workspace member has no registry version to
+# pin, so it reads as a wildcard. `threatflux-atlassian-testkit` is dev-only and
+# `publish = false`; requiring a version on it would defeat the point, since a
+# version field is exactly what stops `cargo publish` from stripping the entry.
+allow-wildcard-paths = true
+
 # Highlight which crate pulled in duplicates
 highlight = "all"
 

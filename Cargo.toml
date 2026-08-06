@@ -3,6 +3,7 @@ members = [
     "crates/threatflux-atlassian-sdk",
     "crates/threatflux-atlassian-cli",
     "crates/threatflux-atlassian-action",
+    "crates/threatflux-atlassian-testkit",
 ]
 resolver = "2"
 
@@ -20,6 +21,10 @@ base64 = "0.23.0"
 chrono = { version = "0.4.42", features = ["serde"] }
 clap = { version = "4.6.1", features = ["derive", "env"] }
 threatflux-atlassian-sdk = { path = "crates/threatflux-atlassian-sdk", version = "0.4.2" }
+# threatflux-atlassian-testkit is deliberately absent from this table. It is a
+# dev-only member that each consumer declares as a bare path dev-dependency with
+# no `version` field, so `cargo publish` strips the entry; inheriting it from
+# here would also make `cargo deny` unable to resolve the versionless entry.
 dotenvy = "0.15"
 fluxencrypt = "0.7.2"
 rand = "0.10.1"
@@ -39,6 +44,31 @@ tracing-subscriber = { version = "0.3.23", features = ["fmt", "env-filter"] }
 url = { version = "2.5.8", features = ["serde"] }
 uuid = { version = "1.23.1", features = ["serde", "v4"] }
 wiremock = "0.6"
+
+# Clippy levels live here, not in crate-root `#![allow(...)]` attributes: a
+# source-level allow outranks the `-D` flags CI passes on the command line, so a
+# single `#![allow(clippy::all)]` silently makes the whole strict invocation
+# vacuous. Every member opts in with `[lints] workspace = true`, and
+# `scripts/check_lint_config.py` fails the build if an inner-attribute allow
+# comes back. Group entries need `priority = -1` so the individual allows below
+# them win. Nothing may repeat these levels on a command line either: cargo appends
+# `cargo clippy -- ...` args after the flags it derives from this table, so a
+# trailing `-D clippy::nursery` would re-deny the individual allows below.
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+cargo = { level = "deny", priority = -1 }
+multiple_crate_versions = "allow"
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+# Deriving `Eq` alongside `PartialEq` on the public types in `types.rs` is a
+# forward commitment that cannot be withdrawn: the first field that is not `Eq`
+# -- an `f64`, a `serde_json::Value` -- would force removing the impl, and that
+# is a breaking change. Keep the door open rather than auto-fixing.
+derive_partial_eq_without_eq = "allow"
 
 [profile.release]
 lto = true
