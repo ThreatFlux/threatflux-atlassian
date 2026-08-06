@@ -482,8 +482,9 @@ impl AtlassianClient {
     /// The returned issue is the one Jira stored, with the fields it derived --
     /// id, status, project -- which the create response does not carry. That
     /// second round trip can fail on its own, and then this returns an error for
-    /// an issue that exists; the failure names the key so the created issue can
-    /// still be found. A caller that needs only the key uses
+    /// an issue that exists. The returned error does not carry the key; the key
+    /// is logged at `ERROR` level, which is enough to find the issue by hand but
+    /// not to act on. A caller that needs the key in code uses
     /// [`create_issue_key`](Self::create_issue_key), which cannot fail that way.
     ///
     /// # Arguments
