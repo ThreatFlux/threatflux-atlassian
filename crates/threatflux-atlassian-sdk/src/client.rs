@@ -454,8 +454,10 @@ impl AtlassianClient {
     ///
     /// # Errors
     ///
-    /// Returns an error if the create request fails or its response cannot be
-    /// parsed. An error means no issue was created.
+    /// Returns an error if Jira rejects the create, or if Jira accepts it and
+    /// its response cannot be read. Only the first means no issue was made: an
+    /// unreadable response leaves an issue whose key nothing learned, which a
+    /// retry would duplicate, so that case is logged.
     pub async fn create_issue_key(&self, request: CreateIssueRequest) -> Result<String> {
         info!("Creating new issue: {}", request.fields.summary);
 
@@ -466,7 +468,10 @@ impl AtlassianClient {
             .make_request(Method::POST, endpoint, Some(&body), None)
             .await?;
 
-        let created_issue: CreateIssueResponse = response.json().await?;
+        let created_issue: CreateIssueResponse =
+            response.json().await.inspect_err(|error| {
+                error!("Jira accepted the create but its response could not be read, so the created issue has no key here: {error}");
+            })?;
         info!("Successfully created issue: {}", created_issue.key);
 
         Ok(created_issue.key)
@@ -1214,6 +1219,45 @@ mod tests {
             .expect("a created issue must yield its key");
 
         assert_eq!(issue_key, "KAN-77");
+    }
+
+    #[tokio::test]
+    async fn test_create_issue_key_reports_a_create_response_it_cannot_read() {
+        // The one error this method can return *after* Jira made the issue, and
+        // the reason its documented boundary is "a rejected create made no
+        // issue" rather than "an error means no issue": a 2xx whose body does
+        // not carry a key leaves an issue behind that a retry would duplicate.
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/rest/api/2/issue"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({ "id": "10077" })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = create_mock_client(&server);
+        let request = CreateIssueRequest {
+            fields: CreateIssueFields {
+                project: ProjectReference::by_key("KAN"),
+                summary: "Created issue".to_string(),
+                issue_type: IssueTypeReference::by_name("Bug"),
+                description: None,
+                assignee: None,
+                priority: None,
+                labels: None,
+                components: None,
+                parent: None,
+                custom_fields: HashMap::new(),
+            },
+        };
+
+        let error = client
+            .create_issue_key(request)
+            .await
+            .expect_err("a create response without a key cannot yield one");
+
+        assert!(matches!(error, AtlassianError::Http { .. }), "{error:?}");
     }
 
     #[tokio::test]
