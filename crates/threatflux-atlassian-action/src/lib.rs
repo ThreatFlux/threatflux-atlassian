@@ -6,7 +6,7 @@ pub mod output;
 pub mod rules;
 
 use crate::env::{resolve_env_alias, ActionEnv};
-use crate::output::{preview, OutputError, OutputWriter};
+use crate::output::{preview_path, OutputError, OutputWriter};
 use anyhow::Result;
 use std::fs;
 use std::fs::OpenOptions;
@@ -203,7 +203,7 @@ fn write_outputs(outcome: &ActionOutcome) -> Result<()> {
         Ok(handle) => handle,
         Err(error) => {
             tracing::warn!(
-                path = %preview(&Path::new(&path).display().to_string()),
+                path = %preview_path(&Path::new(&path).display().to_string()),
                 reason = %error,
                 "GITHUB_OUTPUT could not be opened, so the step publishes no outputs; nothing was written and the reconciliation itself succeeded"
             );
@@ -1119,8 +1119,13 @@ rules:
         // Degraded, not silent: the only record a run leaves of its lost outputs
         // is this line, so it has to carry the level, the path and the reason.
         assert!(log.contains("WARN"), "log was: {log}");
-        let named = &temp_root.display().to_string()[..32];
-        assert!(log.contains(named), "log did not name the path: {log}");
+        // The tail, not the head: `preview_path` keeps the identifying end of the
+        // path, and a raw prefix would not match anyway because the preview escapes
+        // the separators a Windows path is full of.
+        assert!(
+            log.contains("github-output.txt"),
+            "log did not name the path: {log}"
+        );
         assert!(log.contains("could not be opened"), "log was: {log}");
 
         cleanup_env(&["GITHUB_OUTPUT"]);

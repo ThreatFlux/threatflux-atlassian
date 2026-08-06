@@ -362,6 +362,23 @@ pub(crate) fn preview(value: &str) -> String {
     }
 }
 
+/// A bounded, escaped preview of a filesystem path.
+///
+/// Keeps the tail rather than the head: a path is identified by its final
+/// components, and a Windows temp-directory prefix alone can exceed the budget
+/// that [`preview`] allows a token.
+pub(crate) fn preview_path(value: &str) -> String {
+    const LIMIT: usize = 96;
+
+    let count = value.chars().count();
+    if count <= LIMIT {
+        format!("{value:?}")
+    } else {
+        let tail: String = value.chars().skip(count - LIMIT).collect();
+        format!("{tail:?} (truncated from the left)")
+    }
+}
+
 /// Appends encoded entries to a `GITHUB_OUTPUT` sink.
 #[derive(Debug)]
 pub struct OutputWriter<W> {
@@ -1034,5 +1051,25 @@ mod tests {
         assert!(preview.len() < 200, "preview: {preview}");
         assert!(preview.contains("truncated"));
         assert!(!preview.contains(&secret));
+    }
+
+    #[test]
+    fn a_previewed_path_keeps_the_end_that_identifies_it() {
+        // A runner's temp prefix alone can outrun the token budget, so a
+        // head-truncated path names nothing an operator can act on.
+        let long = format!("{}/github-output.txt", "d".repeat(4096));
+        let preview = super::preview_path(&long);
+
+        assert!(preview.len() < 200, "preview: {preview}");
+        assert!(preview.contains("github-output.txt"), "preview: {preview}");
+        assert!(preview.contains("truncated"), "preview: {preview}");
+    }
+
+    #[test]
+    fn a_previewed_path_that_fits_is_left_whole() {
+        let preview = super::preview_path("/tmp/run/github-output.txt");
+
+        assert!(preview.contains("/tmp/run/github-output.txt"));
+        assert!(!preview.contains("truncated"), "preview: {preview}");
     }
 }
