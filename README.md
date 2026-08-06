@@ -97,15 +97,36 @@ Other direct Jira operations remain the supported path in this workspace.
 
 ## Configuration and Operational Behavior
 
+<!-- BEGIN ENV_VARS -->
 | Setting | Default | Behavior |
 | --- | --- | --- |
-| `JIRA_URL` | Required | Jira Cloud site URL; HTTPS is required while certificate verification is enabled. |
+| `JIRA_URL` | Required | Jira site URL. HTTPS is required unconditionally; nothing in the environment can relax it. |
 | `JIRA_USERNAME` | Required | Atlassian account email used in the Basic auth header. |
 | `JIRA_API_TOKEN` | Required | Atlassian API token; never use the account password. |
 | `JIRA_TIMEOUT` | `60` seconds | Whole-request timeout. Invalid values return a configuration error. |
-| `JIRA_CERT_PATH` | System roots | Adds one PEM- or DER-encoded trust root. |
-| `JIRA_VERIFY_SSL` | `true` | Only the case-insensitive value `false` disables certificate verification. |
+| `JIRA_HOST_POLICY` | `atlassian-cloud` | Where the credential may be sent: `atlassian-cloud`, or `allowlist:<host>[,<host>]` for Data Center. The `loopback` token is refused. |
+| `JIRA_VERIFY_SSL` | `true` | Read only in order to refuse a downgrade: a value meaning *disabled* (`false`, `0`, `no`, `off`) is a hard configuration error. |
 | `JIRA_MAX_RETRIES` | `3` | Stored in configuration, but the client does **not** automatically retry requests. |
+<!-- END ENV_VARS -->
+
+Neither the transport scheme requirement nor certificate verification is relaxable from the environment:
+
+- **HTTPS is required regardless of `JIRA_VERIFY_SSL`.** `verify_ssl` is certificate verification and nothing else; it
+  never gates the scheme. The only `http://` destination the SDK admits is a literal loopback address under
+  `HostPolicy::Loopback`, which is reachable from a code call and never from the environment — `JIRA_HOST_POLICY`
+  refuses the `loopback` token outright.
+- **`JIRA_VERIFY_SSL=false` is a configuration error, not a downgrade.** Certificate verification is turned off only by
+  `AtlassianConfigBuilder::verify_ssl(false)` in code, and only for an `https://` URL.
+- **There is no `JIRA_CERT_PATH`.** An extra trust root can vouch for whatever host the same environment chose with
+  `JIRA_URL`, so adding one is a code call (`AtlassianConfig::with_cert_path`) or a CLI flag (`--cert-path`), never an
+  environment variable. A still-exported `JIRA_CERT_PATH` is ignored rather than refused.
+
+The host policy bounds the scheme, not the set of hosts an environment can name: `JIRA_HOST_POLICY` refuses only the
+literal `loopback` token, so `allowlist:<any-host>` is accepted and an environment an attacker can write twice can point
+the credential at an arbitrary `https` host of its choosing.
+The default policy is therefore a safe default, not a containment boundary against a hostile environment — an
+operator's own Data Center deployment is indistinguishable from an attacker's. Pin `JIRA_HOST_POLICY` wherever the API
+token is pinned and keep it out of workflow-settable inputs.
 
 The direct client uses rustls and intentionally disables system proxy discovery with `reqwest::ClientBuilder::no_proxy`;
 `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` are therefore not used. Encrypted credential and env-file inputs are also

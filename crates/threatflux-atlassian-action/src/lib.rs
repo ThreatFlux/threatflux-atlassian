@@ -15,6 +15,8 @@ use std::io::Write;
 use std::path::Path;
 #[cfg(test)]
 use std::sync::Mutex;
+#[cfg(test)]
+use threatflux_atlassian_sdk::HostPolicy;
 use threatflux_atlassian_sdk::{AtlassianClient, AtlassianConfig};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -41,6 +43,21 @@ fn current_test_jira_hook() -> Option<TestJiraHook> {
     TEST_JIRA_HOOK
         .lock()
         .expect("hook lock should succeed")
+        .clone()
+}
+
+// A test that drives the real SDK client needs a loopback mock server, and the
+// SDK deliberately refuses to reach `HostPolicy::Loopback` from the environment
+// -- which is the only input `build_client_from_env` has. The override is
+// `#[cfg(test)]`, so no such path is compiled into the shipped binary at all.
+#[cfg(test)]
+static TEST_HOST_POLICY: Mutex<Option<HostPolicy>> = Mutex::new(None);
+
+#[cfg(test)]
+fn current_test_host_policy() -> Option<HostPolicy> {
+    TEST_HOST_POLICY
+        .lock()
+        .expect("host policy lock should succeed")
         .clone()
 }
 
@@ -79,8 +96,15 @@ fn build_client_from_env() -> Result<AtlassianClient> {
     let api_token = std::env::var("JIRA_API_TOKEN")
         .map_err(|_| anyhow::anyhow!("Missing Jira API token: set JIRA_API_TOKEN"))?;
 
-    let config =
+    #[allow(unused_mut, reason = "only the test build mutates the host policy")]
+    let mut config =
         AtlassianConfig::from_env_with_overrides(Some(base_url), Some(username), Some(api_token))?;
+
+    #[cfg(test)]
+    if let Some(policy) = current_test_host_policy() {
+        config.host_policy = policy;
+    }
+
     Ok(AtlassianClient::new(config)?)
 }
 
@@ -278,7 +302,8 @@ fn skip_if_unencodable(result: Result<()>) -> Result<()> {
 mod tests {
     use super::{
         build_client_from_env, finalize_action, run_from_env, skip_if_unencodable, write_outcome,
-        write_outputs, ActionOutcome, OutputError, OutputWriter, TestJiraHook, TEST_JIRA_HOOK,
+        write_outputs, ActionOutcome, HostPolicy, OutputError, OutputWriter, TestJiraHook,
+        TEST_HOST_POLICY, TEST_JIRA_HOOK,
     };
     use crate::config::load_config_from_str;
     use crate::github::load_issue_event_from_str;
@@ -799,10 +824,12 @@ mod tests {
         guard
             .set("JIRA_BASE_URL", mock.uri())
             .set("JIRA_EMAIL", "action@example.com")
-            .set("JIRA_API_TOKEN", "test-token")
-            // The mock listens on http, and the client refuses a non-https base
-            // URL while it verifies certificates.
-            .set("JIRA_VERIFY_SSL", "false");
+            .set("JIRA_API_TOKEN", "test-token");
+        // The mock listens on http, which the client refuses unless the host is
+        // a literal loopback address under HostPolicy::Loopback. No environment
+        // variable can select that policy, by design, so a test that drives the
+        // real client selects it in code.
+        set_test_host_policy(HostPolicy::Loopback);
 
         let outcome = run_from_env()
             .await
@@ -815,6 +842,8 @@ mod tests {
         assert_eq!(output["created"], "true");
         mock.assert_call_count("POST", CREATE_ENDPOINT, 1).await;
         mock.assert_call_count("GET", READBACK_ENDPOINT, 0).await;
+
+        clear_test_host_policy();
     }
 
     /// A consumer config whose severity capture is deliberately unconstrained.
@@ -1453,5 +1482,17 @@ rules:
 
     fn clear_test_jira_hook() {
         *TEST_JIRA_HOOK.lock().expect("hook lock should succeed") = None;
+    }
+
+    fn set_test_host_policy(policy: HostPolicy) {
+        *TEST_HOST_POLICY
+            .lock()
+            .expect("host policy lock should succeed") = Some(policy);
+    }
+
+    fn clear_test_host_policy() {
+        *TEST_HOST_POLICY
+            .lock()
+            .expect("host policy lock should succeed") = None;
     }
 }

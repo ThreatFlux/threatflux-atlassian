@@ -83,6 +83,15 @@ jobs:
           python3 scripts/check_image_pins.py --self-test
           python3 scripts/check_image_pins.py
 
+      # cargo-audit reads .cargo/audit.toml and cargo-deny reads deny.toml;
+      # neither reads the other. Two lists that must stay identical need a
+      # checker, and the security workflow is too late -- an `--ignore` flag
+      # reintroduced on a command line should fail on the fast job.
+      - name: Check advisory ignore lists
+        run: |
+          python3 scripts/check_advisory_ignores.py --self-test
+          python3 scripts/check_advisory_ignores.py
+
       - name: Run clippy
         run: cargo clippy --workspace --all-features --all-targets -- -D warnings
 
@@ -228,6 +237,21 @@ jobs:
 
       - name: Check feature combinations
         run: cargo hack check --workspace --feature-powerset --no-dev-deps --exclude-no-default-features
+
+      # `encrypted-env` is the only feature that gates dependencies, so it is the
+      # only one whose gate can silently stop holding: `default-features = false`
+      # written on a member entry instead of the workspace entry is dropped by
+      # cargo with a warning. This reads the resolved graph, not the manifests.
+      - name: Check the optional dependency gate
+        run: |
+          python3 scripts/check_dep_gate.py --self-test
+          python3 scripts/check_dep_gate.py
+
+      # The refusals that fire when `encrypted-env` is off are unreachable from
+      # `cargo test --all-features`, which is every other test invocation in this
+      # workflow.
+      - name: Test the SDK without encrypted-env
+        run: cargo test -p threatflux-atlassian-sdk --no-default-features --features direct,remote
 
   # ==========================================================================
   # Documentation

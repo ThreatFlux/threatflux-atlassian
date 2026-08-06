@@ -1,0 +1,24 @@
+# cargo-audit configuration.
+#
+# This file is the single source of truth for `cargo audit` ignores. It replaces
+# the `--ignore RUSTSEC-...` flags that used to be spelled out in the Makefile's
+# `audit` target and twice in .github/workflows/security.yml, where three copies
+# of the same list could drift apart one commit at a time.
+#
+# cargo-deny does NOT read this file. Its own `[advisories] ignore` list in
+# deny.toml is a fourth site that has to say the same thing, so
+# `scripts/check_advisory_ignores.py` fails the build when the two disagree and
+# when a `--ignore RUSTSEC-...` flag reappears on a command line.
+
+[advisories]
+ignore = [
+    # Marvin attack (timing side channel) in `rsa` 0.9.x, which reaches this
+    # workspace only through `fluxencrypt`. `patched = []`: no fixed release of
+    # `rsa` exists, so there is nothing to upgrade to. The SDK's `encrypted-env`
+    # feature makes that path optional -- an SDK consumer on
+    # `default-features = false` and the GitHub Action never link it -- but the
+    # CLI encrypts credentials itself and the SDK's default `full` set keeps the
+    # feature on, so `rsa` is still in the published default graph and the ignore
+    # is still load-bearing.
+    "RUSTSEC-2023-0071",
+]

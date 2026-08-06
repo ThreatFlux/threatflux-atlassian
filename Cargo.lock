@@ -2215,6 +2215,7 @@ dependencies = [
  "serial_test",
  "sha2 0.11.0",
  "thiserror",
+ "threatflux-atlassian-testkit",
  "tokio",
  "tokio-test",
  "tracing",
@@ -2222,6 +2223,7 @@ dependencies = [
  "url",
  "uuid",
  "wiremock",
+ "zeroize",
 ]
 
 [[package]]

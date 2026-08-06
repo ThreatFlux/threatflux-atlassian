@@ -46,11 +46,17 @@ The CLI uses environment-based config by default (with optional CLI overrides):
 | `JIRA_USERNAME`    | Jira account email/username                                 |
 | `JIRA_API_TOKEN`   | Jira API token                                              |
 | `JIRA_TIMEOUT`     | HTTP timeout in seconds (default: `60`)                      |
-| `JIRA_VERIFY_SSL`  | Only case-insensitive `false` disables verification         |
-| `JIRA_CERT_PATH`   | Optional PEM or DER trust-root path                          |
+| `JIRA_HOST_POLICY` | `atlassian-cloud` (default) or `allowlist:<host>[,<host>]`   |
+| `JIRA_VERIFY_SSL`  | Read only so a value meaning *disabled* is a hard error     |
 | `JIRA_MAX_RETRIES` | Stored count (default: `3`); no automatic retries occur     |
 
-CLI flags such as `--base-url`, `--username`, `--api-token`, `--timeout`, and `--insecure` can override env values.
+Adding a trust root is a flag, not a variable: `JIRA_CERT_PATH` is no longer read, because an extra root can vouch for
+whatever host the same environment chose with `JIRA_URL`. Pass `--cert-path <PATH>` instead — a command line is an
+operator's deliberate choice in a way a workflow environment is not. The same rule governs `--host-policy loopback` and
+`--insecure`, neither of which any environment variable can select.
+
+CLI flags such as `--base-url`, `--username`, `--api-token`, `--timeout`, `--host-policy`, `--cert-path`, and
+`--insecure` can override env values.
 The underlying direct client uses rustls and disables system proxy discovery, so proxy environment variables are not
 honored. See the [SDK configuration reference](https://github.com/ThreatFlux/threatflux-atlassian/blob/main/docs/SDK_CONFIGURATION.md)
 for exact behavior.

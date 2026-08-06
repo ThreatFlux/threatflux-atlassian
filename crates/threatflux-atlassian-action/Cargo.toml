@@ -25,6 +25,12 @@ serde.workspace = true
 serde_json.workspace = true
 yaml_serde.workspace = true
 sha2.workspace = true
+# Deliberately no `features` list. The workspace entry is
+# `default-features = false`, so the Action links the SDK without
+# `encrypted-env` and neither fluxencrypt nor rsa reaches the container image.
+# `scripts/check_dep_gate.py` fails the build if that stops being true. The
+# Action reads its Jira credentials from the workflow environment in cleartext,
+# so it never had a use for the decrypt path.
 threatflux-atlassian-sdk.workspace = true
 tokio.workspace = true
 tracing.workspace = true

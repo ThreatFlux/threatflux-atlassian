@@ -62,7 +62,7 @@ NC := \033[0m
         fmt fmt-check lint-config lint lint-strict lint-fix \
         test test-verbose test-doc test-features test-features-full \
         coverage coverage-html coverage-summary \
-        audit deny sbom security \
+        audit deny advisory-ignores dep-gate sbom security \
         docs-check docs docs-open bench bench-check msrv \
         image-pins docker-build docker-push \
         pre-commit ci ci-quick all release-check clean \
@@ -175,7 +175,10 @@ test-doc: ## Run documentation tests
 	@$(CARGO) test --doc --all-features
 	@printf '$(GREEN)Doc tests passed!$(NC)\n'
 
-test-features: ## Test feature combinations
+# `cargo test --all-features` never reaches the code that runs when
+# `encrypted-env` is off, so the missing-feature refusals need their own run.
+# Without it the whole gate is compiled but unexecuted.
+test-features: dep-gate ## Test feature combinations
 	@printf '$(CYAN)Testing feature combinations...$(NC)\n'
 	@printf '$(BLUE)  No default features...$(NC)\n'
 	@$(CARGO) check --workspace --no-default-features
@@ -183,6 +186,8 @@ test-features: ## Test feature combinations
 	@$(CARGO) check --workspace --all-features
 	@printf '$(BLUE)  Default features only...$(NC)\n'
 	@$(CARGO) check --workspace
+	@printf '$(BLUE)  SDK tests without encrypted-env...$(NC)\n'
+	@$(CARGO) test -p threatflux-atlassian-sdk --no-default-features --features direct,remote
 	@printf '$(GREEN)Feature checks passed!$(NC)\n'
 
 test-features-full: ## Test all feature powerset (requires cargo-hack)
@@ -212,15 +217,29 @@ coverage-summary: ## Show coverage summary
 # Security
 # =============================================================================
 
-audit: ## Run security audit
+# The ignore list lives in .cargo/audit.toml, never on this command line: a
+# `--ignore` flag here is a source of truth cargo-deny cannot see, which is how
+# three divergent copies of the same list appeared in the first place.
+# `advisory-ignores` fails the build if one comes back.
+audit: advisory-ignores ## Run security audit
 	@printf '$(CYAN)Running security audit...$(NC)\n'
-	@cargo audit --ignore RUSTSEC-2023-0071
+	@cargo audit
 	@printf '$(GREEN)Security audit passed!$(NC)\n'
 
-deny: ## Check licenses and advisories
+deny: advisory-ignores ## Check licenses and advisories
 	@printf '$(CYAN)Running cargo-deny...$(NC)\n'
 	@cargo deny check
 	@printf '$(GREEN)Deny checks passed!$(NC)\n'
+
+advisory-ignores: ## Verify .cargo/audit.toml and deny.toml ignore the same advisories
+	@printf '$(CYAN)Checking advisory ignore lists...$(NC)\n'
+	@python3 scripts/check_advisory_ignores.py --self-test
+	@python3 scripts/check_advisory_ignores.py
+
+dep-gate: ## Verify the SDK encrypted-env feature keeps fluxencrypt out of the graph
+	@printf '$(CYAN)Checking optional dependency gate...$(NC)\n'
+	@python3 scripts/check_dep_gate.py --self-test
+	@python3 scripts/check_dep_gate.py
 
 sbom: ## Generate CycloneDX SBOMs for the SDK and CLI
 	@printf '$(CYAN)Generating SBOMs...$(NC)\n'

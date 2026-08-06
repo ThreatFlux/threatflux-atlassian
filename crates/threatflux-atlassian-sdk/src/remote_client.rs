@@ -6,7 +6,10 @@
 //! not usable with today's Atlassian Rovo MCP service.
 
 use crate::auth::{AccessToken, McpAuthHandler};
-use crate::error::{AtlassianError, Result};
+use crate::error::{
+    bounded, map_error_response, AtlassianError, DiagnosticsPolicy, FailureContext, FailureShape,
+    ResponseDiagnostics, Result,
+};
 use crate::types::{IssueSearchResult, JiraIssue, JiraUser, Project};
 use reqwest::Client;
 use serde_json::Value;
@@ -28,6 +31,8 @@ pub struct AtlassianRemoteClient {
     mcp_endpoint: Url,
     /// OAuth authentication handler
     auth_handler: Arc<RwLock<McpAuthHandler>>,
+    /// How much of a failing MCP response may reach an error
+    diagnostics: DiagnosticsPolicy,
 }
 
 /// MCP request wrapper
@@ -102,7 +107,19 @@ impl AtlassianRemoteClient {
             client,
             mcp_endpoint,
             auth_handler,
+            diagnostics: DiagnosticsPolicy::default(),
         })
+    }
+
+    /// Choose how much of a failing MCP response may reach an error.
+    ///
+    /// The default is [`DiagnosticsPolicy::MetadataOnly`]. The setting covers this
+    /// client's own MCP requests; the OAuth token requests it makes through
+    /// [`McpAuthHandler`] stay at the default.
+    #[must_use]
+    pub const fn with_diagnostics(mut self, policy: DiagnosticsPolicy) -> Self {
+        self.diagnostics = policy;
+        self
     }
 
     /// Generate the legacy authorization response.
@@ -170,22 +187,11 @@ impl AtlassianRemoteClient {
             .await?;
 
         if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response.text().await.unwrap_or_default();
-
-            return Err(match status.as_u16() {
-                401 => AtlassianError::auth("Authentication failed - token may be expired"),
-                403 => AtlassianError::PermissionDenied {
-                    message: "Insufficient permissions for Atlassian resources".to_string(),
-                },
-                429 => AtlassianError::RateLimit {
-                    message: "Rate limit exceeded".to_string(),
-                },
-                _ => AtlassianError::http(
-                    format!("MCP request failed: {error_text}"),
-                    Some(status.as_u16()),
-                ),
-            });
+            return Err(map_error_response(
+                response,
+                FailureContext::new(FailureShape::RemoteMcp, "MCP request", self.diagnostics),
+            )
+            .await);
         }
 
         let mcp_response: McpResponse = response.json().await?;
@@ -193,7 +199,7 @@ impl AtlassianRemoteClient {
         // Check for MCP-level errors
         if let Some(error) = mcp_response.error {
             return Err(AtlassianError::jira_api(
-                format!("MCP error: {} (code: {})", error.message, error.code),
+                Self::mcp_error_message(&error, self.diagnostics),
                 Some(error.code),
             ));
         }
@@ -201,6 +207,23 @@ impl AtlassianRemoteClient {
         mcp_response
             .result
             .ok_or_else(|| AtlassianError::parse("No result in MCP response".to_string()))
+    }
+
+    /// Renders a JSON-RPC error under `policy`.
+    ///
+    /// A JSON-RPC error arrives on a 200, so it never reaches the failure seam --
+    /// but its `message` is server-supplied response text on the same footing as an
+    /// error body, and it is released under the same policy and the same bound.
+    fn mcp_error_message(error: &McpError, policy: DiagnosticsPolicy) -> String {
+        if policy == DiagnosticsPolicy::MetadataOnly {
+            format!("MCP error (code: {})", error.code)
+        } else {
+            format!(
+                "MCP error: {} (code: {})",
+                bounded(&error.message, ResponseDiagnostics::MESSAGE_LIMIT),
+                error.code
+            )
+        }
     }
 
     /// Send the legacy, currently unsupported payload for reading a Jira issue.
@@ -538,6 +561,42 @@ impl AtlassianRemoteClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_mcp_response_body_is_withheld_unless_the_caller_asks_for_it() {
+        let client = AtlassianRemoteClient::new("test-client-id".to_string(), 8080).unwrap();
+
+        assert_eq!(client.diagnostics, DiagnosticsPolicy::MetadataOnly);
+        assert_eq!(
+            client
+                .with_diagnostics(DiagnosticsPolicy::JiraErrorFields)
+                .diagnostics,
+            DiagnosticsPolicy::JiraErrorFields
+        );
+    }
+
+    #[test]
+    fn an_mcp_error_message_follows_the_same_policy_as_a_response_body() {
+        const MARKER: &str = "server-supplied-text-that-must-not-escape";
+        let error = McpError {
+            code: -32603,
+            message: format!("{MARKER} {}", "x".repeat(4096)),
+            data: None,
+        };
+
+        let withheld =
+            AtlassianRemoteClient::mcp_error_message(&error, DiagnosticsPolicy::MetadataOnly);
+        assert_eq!(withheld, "MCP error (code: -32603)");
+        assert!(!withheld.contains(MARKER));
+
+        let released =
+            AtlassianRemoteClient::mcp_error_message(&error, DiagnosticsPolicy::IncludeBody);
+        assert!(released.contains(MARKER));
+        assert!(
+            released.chars().count() < ResponseDiagnostics::MESSAGE_LIMIT + 64,
+            "released: {released}"
+        );
+    }
 
     #[test]
     fn test_remote_client_creation() {
