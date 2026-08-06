@@ -1,10 +1,11 @@
 //! Jira API client implementation
 //!
-//! This module provides the main AtlassianClient for interacting with Jira APIs,
+//! This module provides the main `AtlassianClient` for interacting with Jira APIs,
 //! including authentication, ticket operations, and project management.
 
 use crate::config::AtlassianConfig;
 use crate::error::{AtlassianError, Result};
+use crate::jql::JqlBuilder;
 use crate::types::{
     CreateIssueRequest, IssueSearchResult, IssueTransition, IssueTransitionsResponse, JiraField,
     JiraIssue, JiraUser, Project, UpdateIssueRequest,
@@ -88,7 +89,7 @@ impl AtlassianClient {
             .build()
             .map_err(|e| AtlassianError::config(format!("Failed to create HTTP client: {e}")))?;
 
-        Ok(AtlassianClient { client, config })
+        Ok(Self { client, config })
     }
 
     /// Create client from environment variables
@@ -133,7 +134,7 @@ impl AtlassianClient {
             },
             _ => AtlassianError::jira_api(
                 format!("API request failed: {error_text}"),
-                Some(status.as_u16() as i32),
+                Some(i32::from(status.as_u16())),
             ),
         })
     }
@@ -189,7 +190,7 @@ impl AtlassianClient {
     pub async fn get_issue(&self, issue_key: &str) -> Result<JiraIssue> {
         info!("Getting issue: {}", issue_key);
 
-        let endpoint = format!("/rest/api/2/issue/{}", issue_key);
+        let endpoint = format!("/rest/api/2/issue/{issue_key}");
         let response = self
             .make_request(Method::GET, &endpoint, None, None)
             .await?;
@@ -226,7 +227,7 @@ impl AtlassianClient {
     ) -> Result<()> {
         info!("Updating issue: {} with {} fields", issue_key, fields.len());
 
-        let endpoint = format!("/rest/api/2/issue/{}", issue_key);
+        let endpoint = format!("/rest/api/2/issue/{issue_key}");
         let update_request = UpdateIssueRequest { fields };
         let body = serde_json::to_value(&update_request)?;
 
@@ -241,7 +242,7 @@ impl AtlassianClient {
         } else {
             Err(AtlassianError::jira_api(
                 format!("Unexpected response status: {}", response.status()),
-                Some(response.status().as_u16() as i32),
+                Some(i32::from(response.status().as_u16())),
             ))
         }
     }
@@ -594,7 +595,7 @@ impl AtlassianClient {
     pub async fn get_project(&self, project_key: &str) -> Result<Project> {
         info!("Getting project: {}", project_key);
 
-        let endpoint = format!("/rest/api/2/project/{}", project_key);
+        let endpoint = format!("/rest/api/2/project/{project_key}");
         let response = self
             .make_request(Method::GET, &endpoint, None, None)
             .await?;
@@ -638,7 +639,7 @@ impl AtlassianClient {
     /// # Arguments
     /// * `issue_key` - Issue key to update
     /// * `story_points` - Story points value
-    /// * `story_points_field_id` - Custom field ID for story points (e.g., "customfield_10100")
+    /// * `story_points_field_id` - Custom field ID for story points (e.g., "`customfield_10100`")
     ///
     /// # Example
     /// ```rust,no_run
@@ -683,7 +684,7 @@ impl AtlassianClient {
     ///
     /// # Arguments
     /// * `issue_key` - Issue key to update
-    /// * `field_id` - Custom field ID (e.g., "customfield_11024")
+    /// * `field_id` - Custom field ID (e.g., "`customfield_11024`")
     /// * `value` - Field value
     ///
     /// # Example
@@ -716,15 +717,14 @@ impl AtlassianClient {
     pub async fn get_issue_transitions(&self, issue_key: &str) -> Result<Vec<IssueTransition>> {
         info!("Fetching transitions for issue: {}", issue_key);
 
-        let endpoint = format!("/rest/api/2/issue/{}/transitions", issue_key);
+        let endpoint = format!("/rest/api/2/issue/{issue_key}/transitions");
         let response = self
             .make_request(Method::GET, &endpoint, None, None)
             .await?;
 
         let payload: IssueTransitionsResponse = response.json().await.map_err(|err| {
             AtlassianError::parse(format!(
-                "Failed to parse transition list for {}: {}",
-                issue_key, err
+                "Failed to parse transition list for {issue_key}: {err}"
             ))
         })?;
 
@@ -749,7 +749,7 @@ impl AtlassianClient {
             issue_key, transition_id
         );
 
-        let endpoint = format!("/rest/api/2/issue/{}/transitions", issue_key);
+        let endpoint = format!("/rest/api/2/issue/{issue_key}/transitions");
         let mut payload = json!({
             "transition": { "id": transition_id }
         });
@@ -792,11 +792,8 @@ impl AtlassianClient {
                 issue_key, status
             );
             Err(AtlassianError::jira_api(
-                format!(
-                    "Failed to transition issue {} (HTTP status {})",
-                    issue_key, status
-                ),
-                Some(status.as_u16() as i32),
+                format!("Failed to transition issue {issue_key} (HTTP status {status})"),
+                Some(i32::from(status.as_u16())),
             ))
         }
     }
@@ -818,24 +815,21 @@ impl AtlassianClient {
             .iter()
             .find(|candidate| candidate.name.eq_ignore_ascii_case(transition_name.trim()));
 
-        match transition {
-            Some(match_transition) => {
-                self.transition_issue(issue_key, &match_transition.id, comment)
-                    .await
-            }
-            None => {
-                let available: Vec<String> = transitions.into_iter().map(|t| t.name).collect();
-                error!(
-                    "Transition {} not available for {}. Available transitions: {:?}",
-                    transition_name, issue_key, available
-                );
-                Err(AtlassianError::validation(format!(
-                    "Transition '{}' is not available for issue {}. Available transitions: {}",
-                    transition_name,
-                    issue_key,
-                    available.join(", ")
-                )))
-            }
+        if let Some(match_transition) = transition {
+            self.transition_issue(issue_key, &match_transition.id, comment)
+                .await
+        } else {
+            let available: Vec<String> = transitions.into_iter().map(|t| t.name).collect();
+            error!(
+                "Transition {} not available for {}. Available transitions: {:?}",
+                transition_name, issue_key, available
+            );
+            Err(AtlassianError::validation(format!(
+                "Transition '{}' is not available for issue {}. Available transitions: {}",
+                transition_name,
+                issue_key,
+                available.join(", ")
+            )))
         }
     }
 
@@ -846,8 +840,14 @@ impl AtlassianClient {
     /// implementation of enhanced search at `/rest/api/2/search/jql` for new work.
     ///
     /// # Arguments
-    /// * `project_key` - Project key (e.g., "PROJ")
+    /// * `project_key` - Project key (e.g., "PROJ"), quoted and escaped into the
+    ///   generated query by [`crate::jql`]
     /// * `limit` - Maximum number of results
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AtlassianError::Validation`] when `project_key` contains U+0000,
+    /// which JQL cannot represent.
     ///
     /// # Example
     /// ```rust,no_run
@@ -864,7 +864,7 @@ impl AtlassianClient {
         project_key: &str,
         limit: u32,
     ) -> Result<Vec<JiraIssue>> {
-        let jql = format!("project = {}", project_key);
+        let jql = JqlBuilder::new().eq("project", project_key)?.build()?;
         let search_result = self.search_issues(&jql, 0, limit).await?;
         Ok(search_result.issues)
     }
@@ -931,7 +931,7 @@ impl AtlassianClient {
 // Implement Clone for AtlassianClient to support Arc usage
 impl Clone for AtlassianClient {
     fn clone(&self) -> Self {
-        AtlassianClient {
+        Self {
             client: self.client.clone(),
             config: self.config.clone(),
         }
@@ -1305,5 +1305,62 @@ mod tests {
             client.delete_issue_link("not-a-number").await,
             Err(AtlassianError::Validation { .. })
         ));
+    }
+
+    async fn mount_empty_search(server: &MockServer, expected_jql: &str) {
+        Mock::given(method("GET"))
+            .and(path("/rest/api/2/search"))
+            .and(query_param("jql", expected_jql))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "total": 0,
+                "startAt": 0,
+                "maxResults": 50,
+                "issues": [],
+            })))
+            .expect(1)
+            .mount(server)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn test_get_project_issues_quotes_the_project_key() {
+        let server = MockServer::start().await;
+        mount_empty_search(&server, r#"project = "TEST""#).await;
+
+        let client = create_mock_client(&server);
+        let issues = client.get_project_issues("TEST", 50).await.unwrap();
+
+        assert!(issues.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_project_issues_keeps_a_hostile_project_key_inside_its_literal() {
+        let server = MockServer::start().await;
+        mount_empty_search(&server, r#"project = "TEST\" OR project = \"EVIL""#).await;
+
+        let client = create_mock_client(&server);
+        let issues = client
+            .get_project_issues(r#"TEST" OR project = "EVIL"#, 50)
+            .await
+            .unwrap();
+
+        assert!(issues.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_project_issues_rejects_an_unrepresentable_project_key() {
+        let server = MockServer::start().await;
+        // No mock is mounted: the query must fail before any request is sent.
+        let client = create_mock_client(&server);
+
+        assert!(matches!(
+            client.get_project_issues("TE\0ST", 50).await,
+            Err(AtlassianError::Validation { .. })
+        ));
+        assert!(server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .is_empty());
     }
 }

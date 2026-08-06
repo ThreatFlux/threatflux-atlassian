@@ -1,0 +1,32 @@
+[package]
+name = "threatflux-atlassian-testkit"
+description = "Dev-only fixtures and test harnesses for the threatflux-atlassian workspace"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+# Test infrastructure, never a runtime dependency of the SDK, the CLI or the
+# Action: `publish = false` keeps it out of the registry, and consumers depend on
+# it by path with no `version` field so `cargo publish` strips the entry.
+publish = false
+
+# This crate deliberately does not depend on threatflux-atlassian-sdk. Everything
+# it exposes is `&'static str` or `serde_json::Value`, which avoids a
+# dev-dependency cycle, keeps it usable from all three members, and lets the same
+# fixture file serve as a wiremock response body and as a golden comparison.
+[dependencies]
+base64.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+wiremock.workspace = true
+
+[dev-dependencies]
+reqwest.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

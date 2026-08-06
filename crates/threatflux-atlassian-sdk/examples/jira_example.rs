@@ -1,5 +1,3 @@
-#![allow(clippy::all, clippy::pedantic, clippy::nursery)]
-
 use std::collections::HashMap;
 use threatflux_atlassian_sdk::{
     AtlassianClient, CreateIssueFields, CreateIssueRequest, IssueTypeReference, ProjectReference,
@@ -8,6 +6,7 @@ use threatflux_atlassian_sdk::{
 
 /// Example demonstrating Atlassian SDK Jira operations
 /// Based on the Python examples for ticket creation and updates
+#[allow(clippy::too_many_lines, reason = "linear end-to-end demo script")]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging

@@ -95,10 +95,10 @@ impl AtlassianRemoteClient {
         })?;
         let mcp_endpoint = Url::parse("https://mcp.atlassian.com/v1/sse")?;
 
-        let auth_handler = McpAuthHandler::new(client_id.clone(), callback_port)?;
+        let auth_handler = McpAuthHandler::new(client_id, callback_port)?;
         let auth_handler = Arc::new(RwLock::new(auth_handler));
 
-        Ok(AtlassianRemoteClient {
+        Ok(Self {
             client,
             mcp_endpoint,
             auth_handler,

@@ -1,0 +1,21 @@
+version: 1
+rules:
+  - id: x
+    when:
+      event: issues
+      action: opened
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(high)\b'
+    jira:
+      project_key: KAN
+      issue_type: Bug
+      priority_by_severity:
+        high: High
+      summary: test
+      description_format: adf
+      description: test
+      dedupe:
+        strategy: sha256
+        fields: [issue.title]

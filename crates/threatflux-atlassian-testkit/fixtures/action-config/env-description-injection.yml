@@ -1,0 +1,20 @@
+version: 1
+rules:
+  - id: dependabot-high-issues
+    when:
+      event: issues
+      action: opened
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(high|critical)\b'
+    jira:
+      project_key: KAN
+      issue_type: Bug
+      priority_by_severity:
+        high: High
+      summary: test
+      description: ${JIRA_DESCRIPTION}
+      dedupe:
+        strategy: sha256
+        fields: [issue.title]

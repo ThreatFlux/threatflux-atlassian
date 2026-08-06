@@ -1,6 +1,8 @@
 use std::fs;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
+use threatflux_atlassian_testkit::fixtures;
+use threatflux_atlassian_testkit::gha::github_output_map;
 
 fn unique_temp_dir(prefix: &str) -> std::path::PathBuf {
     let nanos = SystemTime::now()
@@ -21,63 +23,37 @@ fn action_binary_supports_dry_run_fixture_execution() {
 
     fs::write(
         &config_path,
-        r#"
-version: 1
-rules:
-  - id: dependabot-high-issues
-    when:
-      event: issues
-      action: opened
-      actor_in:
-        - dependabot[bot]
-    extract:
-      severity:
-        from: issue.body
-        regex: '(?mi)^severity:\s*(high|critical)\b'
-    jira:
-      project_key: KAN
-      issue_type: Bug
-      priority_by_severity:
-        high: High
-        critical: Highest
-      summary: "{{ issue.title }}"
-      description: "{{ issue.body }}"
-      dedupe:
-        strategy: sha256
-        fields:
-          - repository.full_name
-          - issue.title
-"#,
+        fixtures::action_config("dependabot-high-plain-templates"),
     )
     .expect("config should be written");
 
     fs::write(
         &event_path,
-        r#"{
-  "action": "opened",
-  "issue": {
-    "title": "Bump foo",
-    "body": "Severity: high\nPackage: foo",
-    "html_url": "https://github.com/ThreatFlux/demo/issues/1",
-    "user": { "login": "dependabot[bot]" }
-  },
-  "repository": { "full_name": "ThreatFlux/demo" }
-}"#,
+        fixtures::github_event("issues-opened-dependabot-high-package"),
     )
     .expect("event should be written");
 
+    // The hyphenated names are the ones the GitHub runner sets for a container
+    // action; the binary is invoked here exactly as the runner invokes it.
     let status = Command::new(env!("CARGO_BIN_EXE_threatflux-atlassian-action"))
-        .env("INPUT_CONFIG_PATH", config_path.display().to_string())
-        .env("INPUT_DRY_RUN", "true")
-        .env("INPUT_EVENT_NAME", "issues")
-        .env("INPUT_EVENT_PATH", event_path.display().to_string())
+        .env_remove("INPUT_CONFIG_PATH")
+        .env_remove("INPUT_DRY_RUN")
+        .env_remove("INPUT_EVENT_NAME")
+        .env_remove("INPUT_EVENT_PATH")
+        .env_remove("JIRA_BASE_URL")
+        .env_remove("JIRA_URL")
+        .env("INPUT_CONFIG-PATH", config_path.display().to_string())
+        .env("INPUT_DRY-RUN", "true")
+        .env("INPUT_EVENT-NAME", "issues")
+        .env("INPUT_EVENT-PATH", event_path.display().to_string())
         .env("GITHUB_OUTPUT", output_path.display().to_string())
         .status()
         .expect("binary should execute");
 
     assert!(status.success());
 
-    let output = fs::read_to_string(&output_path).expect("github output should exist");
-    assert!(output.contains("matched-rule-id=dependabot-high-issues"));
-    assert!(output.contains("severity=high"));
+    let raw = fs::read_to_string(&output_path).expect("github output should exist");
+    let output = github_output_map(&raw).expect("the runner must be able to parse the output file");
+    assert_eq!(output["matched-rule-id"], "dependabot-high-issues");
+    assert_eq!(output["severity"], "high");
 }

@@ -22,17 +22,15 @@ BINARY_NAME ?= tflux-atlassian
 SBOM_MANIFEST_PATH ?= crates/threatflux-atlassian-cli/Cargo.toml
 PUBLISH_PACKAGES ?= threatflux-atlassian-sdk threatflux-atlassian-cli
 
-# Clippy configuration - strict by default
-CLIPPY_FLAGS := -D warnings \
-	-D clippy::all \
-	-D clippy::pedantic \
-	-D clippy::nursery \
-	-D clippy::cargo \
-	-A clippy::multiple_crate_versions \
-	-A clippy::module_name_repetitions \
-	-A clippy::missing_errors_doc \
-	-A clippy::missing_panics_doc \
-	-A clippy::must_use_candidate
+# Clippy configuration - strict by default.
+# NOTE: the lint levels themselves live in [workspace.lints.clippy] in the root
+# Cargo.toml, NOT here. A crate-root `#![allow(clippy::...)]` outranks any -D
+# passed on the command line, so a source-level suppression would silently make
+# this invocation vacuous; the manifest levels cannot be overridden that way.
+# Repeating the list here would also be a second source of truth that drifts.
+# scripts/check_lint_config.py enforces both halves. `-D warnings` stays: it is a
+# rustc level, not a Clippy one.
+CLIPPY_FLAGS := -D warnings
 
 # Colors for output
 # NOTE: these are emitted with printf, never `echo "...\n"`. POSIX leaves echo's
@@ -61,12 +59,12 @@ NC := \033[0m
 # repo root, so without this make would consider `docs` up to date and silently
 # skip rustdoc and docs-check (and therefore drop them from `ci`).
 .PHONY: help dev-setup install-hooks build build-release check \
-        fmt fmt-check lint lint-strict lint-fix \
+        fmt fmt-check lint-config lint lint-strict lint-fix \
         test test-verbose test-doc test-features test-features-full \
         coverage coverage-html coverage-summary \
         audit deny sbom security \
         docs-check docs docs-open bench bench-check msrv \
-        docker-build docker-push \
+        image-pins docker-build docker-push \
         pre-commit ci ci-quick all release-check clean \
         f l t b c
 
@@ -139,19 +137,24 @@ fmt-check: ## Check code formatting
 	@$(CARGO) fmt --all -- --check
 	@printf '$(GREEN)Format check passed!$(NC)\n'
 
-lint: ## Run clippy linter (standard)
+lint-config: ## Verify the workspace Clippy configuration is not bypassed
+	@printf '$(CYAN)Checking lint configuration...$(NC)\n'
+	@python3 scripts/check_lint_config.py --self-test
+	@python3 scripts/check_lint_config.py
+
+lint: lint-config ## Run clippy linter (standard)
 	@printf '$(CYAN)Running clippy...$(NC)\n'
-	@$(CARGO) clippy --all-features --all-targets -- -D warnings
+	@$(CARGO) clippy --workspace --all-features --all-targets -- $(CLIPPY_FLAGS)
 	@printf '$(GREEN)Linting passed!$(NC)\n'
 
-lint-strict: ## Run clippy with strict flags
-	@printf '$(CYAN)Running strict clippy...$(NC)\n'
-	@$(CARGO) clippy --all-features --all-targets -- $(CLIPPY_FLAGS)
+# With the levels in the manifest, `lint` is already the strict invocation; this
+# target survives as an alias so existing callers keep working.
+lint-strict: lint ## Run clippy with strict flags (alias for lint)
 	@printf '$(GREEN)Strict linting passed!$(NC)\n'
 
 lint-fix: ## Run clippy and apply fixes
 	@printf '$(CYAN)Applying clippy fixes...$(NC)\n'
-	@$(CARGO) clippy --all-features --all-targets --fix --allow-dirty --allow-staged -- -D warnings
+	@$(CARGO) clippy --workspace --all-features --all-targets --fix --allow-dirty --allow-staged -- $(CLIPPY_FLAGS)
 	@printf '$(GREEN)Fixes applied!$(NC)\n'
 
 # =============================================================================
@@ -277,7 +280,12 @@ msrv: ## Check minimum supported Rust version
 # Docker
 # =============================================================================
 
-docker-build: ## Build Docker image
+image-pins: ## Verify every Dockerfile FROM is digest-pinned
+	@printf '$(CYAN)Checking container image pins...$(NC)\n'
+	@python3 scripts/check_image_pins.py --self-test
+	@python3 scripts/check_image_pins.py
+
+docker-build: image-pins ## Build Docker image
 	@printf '$(CYAN)Building Docker image...$(NC)\n'
 	@docker build \
 		--build-arg BINARY_NAME=$(BINARY_NAME) \
@@ -299,10 +307,10 @@ docker-push: ## Push Docker image to registry
 pre-commit: fmt-check lint test-doc docs-check ## Pre-commit checks
 	@printf '$(GREEN)Pre-commit checks passed!$(NC)\n'
 
-ci: fmt-check lint test test-features docs security ## Full CI checks
+ci: fmt-check lint image-pins test test-features docs security ## Full CI checks
 	@printf '$(GREEN)All CI checks passed!$(NC)\n'
 
-ci-quick: fmt-check lint check ## Quick CI checks
+ci-quick: fmt-check lint image-pins check ## Quick CI checks
 	@printf '$(GREEN)Quick CI checks passed!$(NC)\n'
 
 all: ci coverage bench-check ## Full validation suite

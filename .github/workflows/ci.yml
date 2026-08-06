@@ -66,18 +66,25 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-      - name: Run clippy
+      # The lint levels live in [workspace.lints.clippy] and are deliberately not
+      # repeated below. A crate-root `#![allow(clippy::all)]` outranks a
+      # command-line -D and would leave the clippy step passing without checking
+      # anything; a command-line group -D outranks the manifest's individual
+      # allows. This checker refuses both.
+      - name: Check lint configuration
         run: |
-          cargo clippy --all-features --all-targets -- \
-            -D warnings \
-            -D clippy::all \
-            -D clippy::pedantic \
-            -D clippy::nursery \
-            -A clippy::multiple_crate_versions \
-            -A clippy::module_name_repetitions \
-            -A clippy::missing_errors_doc \
-            -A clippy::missing_panics_doc \
-            -A clippy::must_use_candidate
+          python3 scripts/check_lint_config.py --self-test
+          python3 scripts/check_lint_config.py
+
+      # The tag stays in front of the digest so the docker ecosystem declared at
+      # / in dependabot.yml can still resolve a newer version and bump both.
+      - name: Check container image pins
+        run: |
+          python3 scripts/check_image_pins.py --self-test
+          python3 scripts/check_image_pins.py
+
+      - name: Run clippy
+        run: cargo clippy --workspace --all-features --all-targets -- -D warnings
 
   # ==========================================================================
   # Test Suite - Cross-platform testing

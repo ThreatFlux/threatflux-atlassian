@@ -54,7 +54,7 @@ pub struct IssueFields {
     pub components: Vec<Component>,
     /// Parent issue (for subtasks)
     pub parent: Option<Box<JiraIssue>>,
-    /// Custom fields (using HashMap for flexibility)
+    /// Custom fields (using `HashMap` for flexibility)
     #[serde(flatten)]
     pub custom_fields: HashMap<String, serde_json::Value>,
 }
@@ -348,7 +348,7 @@ pub struct FieldSchema {
 impl ProjectReference {
     /// Create a project reference by key
     pub fn by_key(key: impl Into<String>) -> Self {
-        ProjectReference {
+        Self {
             key: Some(key.into()),
             id: None,
         }
@@ -356,7 +356,7 @@ impl ProjectReference {
 
     /// Create a project reference by ID
     pub fn by_id(id: impl Into<String>) -> Self {
-        ProjectReference {
+        Self {
             key: None,
             id: Some(id.into()),
         }
@@ -366,7 +366,7 @@ impl ProjectReference {
 impl IssueTypeReference {
     /// Create an issue type reference by name
     pub fn by_name(name: impl Into<String>) -> Self {
-        IssueTypeReference {
+        Self {
             name: Some(name.into()),
             id: None,
         }
@@ -374,7 +374,7 @@ impl IssueTypeReference {
 
     /// Create an issue type reference by ID
     pub fn by_id(id: impl Into<String>) -> Self {
-        IssueTypeReference {
+        Self {
             name: None,
             id: Some(id.into()),
         }
@@ -384,7 +384,7 @@ impl IssueTypeReference {
 impl UserReference {
     /// Create a user reference by account ID (cloud)
     pub fn by_account_id(account_id: impl Into<String>) -> Self {
-        UserReference {
+        Self {
             account_id: Some(account_id.into()),
             name: None,
         }
@@ -392,7 +392,7 @@ impl UserReference {
 
     /// Create a user reference by username (server)
     pub fn by_name(name: impl Into<String>) -> Self {
-        UserReference {
+        Self {
             account_id: None,
             name: Some(name.into()),
         }
@@ -402,7 +402,7 @@ impl UserReference {
 impl IssueReference {
     /// Create an issue reference by key
     pub fn by_key(key: impl Into<String>) -> Self {
-        IssueReference {
+        Self {
             key: Some(key.into()),
             id: None,
         }
@@ -410,7 +410,7 @@ impl IssueReference {
 
     /// Create an issue reference by ID
     pub fn by_id(id: impl Into<String>) -> Self {
-        IssueReference {
+        Self {
             key: None,
             id: Some(id.into()),
         }
@@ -420,7 +420,7 @@ impl IssueReference {
 impl CustomFieldValue {
     /// Create a custom field value
     pub fn new(value: impl Into<String>) -> Self {
-        CustomFieldValue {
+        Self {
             value: Some(value.into()),
             id: None,
         }
@@ -428,7 +428,7 @@ impl CustomFieldValue {
 
     /// Create a custom field value with ID
     pub fn with_id(id: impl Into<String>) -> Self {
-        CustomFieldValue {
+        Self {
             value: None,
             id: Some(id.into()),
         }

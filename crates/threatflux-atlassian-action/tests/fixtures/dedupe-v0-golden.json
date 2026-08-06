@@ -1,0 +1,399 @@
+{
+  "note": [
+    "Golden vector for the dedupe label the Action emits today, produced by",
+    "compute_dedupe_label in crates/threatflux-atlassian-action/src/rules.rs.",
+    "Live Jira issues carry these exact labels, so a diff here is a",
+    "compatibility break rather than a refactor: every label already written",
+    "into Jira stops matching. Change this file only in the change that",
+    "deliberately moves the scheme, and ship the migration with it."
+  ],
+  "scheme": {
+    "id": "v0-sha256-12",
+    "digest": "sha256",
+    "hex_digest_prefix_chars": 12,
+    "field_joiner": "\n",
+    "label_format": "{label_prefix}-{hex_sha256_of_joined_values:.12}",
+    "default_label_prefix": "jira-automation",
+    "project_key": "KAN"
+  },
+  "cases": [
+    {
+      "name": "shipped-dependabot-repository-and-title",
+      "event": {
+        "fixture": "issues-opened-dependabot"
+      },
+      "label_prefix": "dependabot-alert",
+      "fields": [
+        "repository.full_name",
+        "issue.title"
+      ],
+      "values": [
+        "ThreatFlux/demo",
+        "Bump openssl from 1.0 to 1.1"
+      ],
+      "label": "dependabot-alert-e6bebe4d0a17",
+      "jql": "project = \"KAN\" AND labels = \"dependabot-alert-e6bebe4d0a17\"",
+      "note": "The dedupe block every shipped config uses."
+    },
+    {
+      "name": "default-label-prefix-repository-and-title",
+      "event": {
+        "fixture": "issues-opened-dependabot"
+      },
+      "label_prefix": null,
+      "fields": [
+        "repository.full_name",
+        "issue.title"
+      ],
+      "values": [
+        "ThreatFlux/demo",
+        "Bump openssl from 1.0 to 1.1"
+      ],
+      "label": "jira-automation-e6bebe4d0a17",
+      "jql": "project = \"KAN\" AND labels = \"jira-automation-e6bebe4d0a17\"",
+      "note": "label_prefix omitted, so the built-in default applies."
+    },
+    {
+      "name": "single-field-repository-full-name",
+      "event": {
+        "fixture": "issues-opened-dependabot"
+      },
+      "label_prefix": "dependabot-alert",
+      "fields": [
+        "repository.full_name"
+      ],
+      "values": [
+        "ThreatFlux/demo"
+      ],
+      "label": "dependabot-alert-70c40c14cc0f",
+      "jql": "project = \"KAN\" AND labels = \"dependabot-alert-70c40c14cc0f\""
+    },
+    {
+      "name": "single-field-issue-title",
+      "event": {
+        "fixture": "issues-opened-dependabot"
+      },
+      "label_prefix": "dependabot-alert",
+      "fields": [
+        "issue.title"
+      ],
+      "values": [
+        "Bump openssl from 1.0 to 1.1"
+      ],
+      "label": "dependabot-alert-0fda2cdbb2c9",
+      "jql": "project = \"KAN\" AND labels = \"dependabot-alert-0fda2cdbb2c9\""
+    },
+    {
+      "name": "single-field-issue-html-url",
+      "event": {
+        "fixture": "issues-opened-dependabot"
+      },
+      "label_prefix": "dependabot-alert",
+      "fields": [
+        "issue.html_url"
+      ],
+      "values": [
+        "https://github.com/ThreatFlux/demo/issues/123"
+      ],
+      "label": "dependabot-alert-e642d1dd494c",
+      "jql": "project = \"KAN\" AND labels = \"dependabot-alert-e642d1dd494c\""
+    },
+    {
+      "name": "single-field-issue-user-login",
+      "event": {
+        "fixture": "issues-opened-dependabot"
+      },
+      "label_prefix": "dependabot-alert",
+      "fields": [
+        "issue.user.login"
+      ],
+      "values": [
+        "dependabot[bot]"
+      ],
+      "label": "dependabot-alert-3aa597297d43",
+      "jql": "project = \"KAN\" AND labels = \"dependabot-alert-3aa597297d43\""
+    },
+    {
+      "name": "single-field-issue-body",
+      "event": {
+        "fixture": "issues-opened-dependabot"
+      },
+      "label_prefix": "dependabot-alert",
+      "fields": [
+        "issue.body"
+      ],
+      "values": [
+        "Severity: high\nPackage: openssl\nPatched versions: 1.1.1\n\nBumps [openssl](https://github.com/sfackler/rust-openssl) from 1.0 to 1.1.\n\nDependabot will resolve any conflicts with this issue as long as you don't\nalter it yourself.\n"
+      ],
+      "label": "dependabot-alert-46a882f43d88",
+      "jql": "project = \"KAN\" AND labels = \"dependabot-alert-46a882f43d88\""
+    },
+    {
+      "name": "field-order-is-load-bearing",
+      "event": {
+        "fixture": "issues-opened-dependabot"
+      },
+      "label_prefix": "dependabot-alert",
+      "fields": [
+        "issue.title",
+        "repository.full_name"
+      ],
+      "values": [
+        "Bump openssl from 1.0 to 1.1",
+        "ThreatFlux/demo"
+      ],
+      "label": "dependabot-alert-db8f71b4561b",
+      "jql": "project = \"KAN\" AND labels = \"dependabot-alert-db8f71b4561b\"",
+      "note": "Same two fields as the shipped block, reversed: a different label."
+    },
+    {
+      "name": "newline-in-one-field-collides-with-two-fields",
+      "event": {
+        "fixture": "issues-opened-dependabot",
+        "title": "ThreatFlux/demo\nBump openssl from 1.0 to 1.1"
+      },
+      "label_prefix": "dependabot-alert",
+      "fields": [
+        "issue.title"
+      ],
+      "values": [
+        "ThreatFlux/demo\nBump openssl from 1.0 to 1.1"
+      ],
+      "label": "dependabot-alert-e6bebe4d0a17",
+      "jql": "project = \"KAN\" AND labels = \"dependabot-alert-e6bebe4d0a17\"",
+      "note": "Fields are joined with a newline and the joiner is not escaped, so this single field hashes to the same digest as the two-field shipped block."
+    },
+    {
+      "name": "identity-pair-issue-101",
+      "event": {
+        "fixture": "identity-pair-issue-101"
+      },
+      "label_prefix": "dependabot-alert",
+      "fields": [
+        "repository.full_name",
+        "issue.title"
+      ],
+      "values": [
+        "ThreatFlux/demo",
+        "Bump serde from 1.0.219 to 1.0.228"
+      ],
+      "label": "dependabot-alert-8831b9ae2c2a",
+      "jql": "project = \"KAN\" AND labels = \"dependabot-alert-8831b9ae2c2a\""
+    },
+    {
+      "name": "identity-pair-issue-202",
+      "event": {
+        "fixture": "identity-pair-issue-202"
+      },
+      "label_prefix": "dependabot-alert",
+      "fields": [
+        "repository.full_name",
+        "issue.title"
+      ],
+      "values": [
+        "ThreatFlux/demo",
+        "Bump serde from 1.0.219 to 1.0.228"
+      ],
+      "label": "dependabot-alert-8831b9ae2c2a",
+      "jql": "project = \"KAN\" AND labels = \"dependabot-alert-8831b9ae2c2a\""
+    },
+    {
+      "name": "identity-pair-issue-101-with-html-url",
+      "event": {
+        "fixture": "identity-pair-issue-101"
+      },
+      "label_prefix": "dependabot-alert",
+      "fields": [
+        "repository.full_name",
+        "issue.html_url"
+      ],
+      "values": [
+        "ThreatFlux/demo",
+        "https://github.com/ThreatFlux/demo/issues/101"
+      ],
+      "label": "dependabot-alert-779af05faed6",
+      "jql": "project = \"KAN\" AND labels = \"dependabot-alert-779af05faed6\""
+    },
+    {
+      "name": "identity-pair-issue-202-with-html-url",
+      "event": {
+        "fixture": "identity-pair-issue-202"
+      },
+      "label_prefix": "dependabot-alert",
+      "fields": [
+        "repository.full_name",
+        "issue.html_url"
+      ],
+      "values": [
+        "ThreatFlux/demo",
+        "https://github.com/ThreatFlux/demo/issues/202"
+      ],
+      "label": "dependabot-alert-9768aea2eec2",
+      "jql": "project = \"KAN\" AND labels = \"dependabot-alert-9768aea2eec2\""
+    },
+    {
+      "name": "hostile-title-crlf",
+      "event": {
+        "fixture": "issues-opened-dependabot",
+        "title": "Bump openssl\r\nfrom 1.0 to 1.1"
+      },
+      "label_prefix": "dependabot-alert",
+      "fields": [
+        "repository.full_name",
+        "issue.title"
+      ],
+      "values": [
+        "ThreatFlux/demo",
+        "Bump openssl\r\nfrom 1.0 to 1.1"
+      ],
+      "label": "dependabot-alert-a8f9e363390e",
+      "jql": "project = \"KAN\" AND labels = \"dependabot-alert-a8f9e363390e\""
+    },
+    {
+      "name": "hostile-title-lone-cr",
+      "event": {
+        "fixture": "issues-opened-dependabot",
+        "title": "Bump openssl\rfrom 1.0 to 1.1"
+      },
+      "label_prefix": "dependabot-alert",
+      "fields": [
+        "repository.full_name",
+        "issue.title"
+      ],
+      "values": [
+        "ThreatFlux/demo",
+        "Bump openssl\rfrom 1.0 to 1.1"
+      ],
+      "label": "dependabot-alert-bd9158b52304",
+      "jql": "project = \"KAN\" AND labels = \"dependabot-alert-bd9158b52304\""
+    },
+    {
+      "name": "hostile-title-lf",
+      "event": {
+        "fixture": "issues-opened-dependabot",
+        "title": "Bump openssl\nfrom 1.0 to 1.1"
+      },
+      "label_prefix": "dependabot-alert",
+      "fields": [
+        "repository.full_name",
+        "issue.title"
+      ],
+      "values": [
+        "ThreatFlux/demo",
+        "Bump openssl\nfrom 1.0 to 1.1"
+      ],
+      "label": "dependabot-alert-65f63fef63a6",
+      "jql": "project = \"KAN\" AND labels = \"dependabot-alert-65f63fef63a6\"",
+      "note": "CRLF, lone CR and LF twins of one title; three distinct labels."
+    },
+    {
+      "name": "hostile-title-github-output-delimiter-literal",
+      "event": {
+        "fixture": "issues-opened-dependabot",
+        "title": "Bump ghadelimiter_deadbeefcafe openssl"
+      },
+      "label_prefix": "dependabot-alert",
+      "fields": [
+        "repository.full_name",
+        "issue.title"
+      ],
+      "values": [
+        "ThreatFlux/demo",
+        "Bump ghadelimiter_deadbeefcafe openssl"
+      ],
+      "label": "dependabot-alert-905253d0fcf1",
+      "jql": "project = \"KAN\" AND labels = \"dependabot-alert-905253d0fcf1\""
+    },
+    {
+      "name": "hostile-title-env-expansion-marker",
+      "event": {
+        "fixture": "issues-opened-dependabot",
+        "title": "Bump ${JIRA_API_TOKEN} openssl"
+      },
+      "label_prefix": "dependabot-alert",
+      "fields": [
+        "repository.full_name",
+        "issue.title"
+      ],
+      "values": [
+        "ThreatFlux/demo",
+        "Bump ${JIRA_API_TOKEN} openssl"
+      ],
+      "label": "dependabot-alert-944a6122e63e",
+      "jql": "project = \"KAN\" AND labels = \"dependabot-alert-944a6122e63e\""
+    },
+    {
+      "name": "hostile-title-jql-metacharacters",
+      "event": {
+        "fixture": "issues-opened-dependabot",
+        "title": "Bump \"openssl\" AND labels = 'x' OR key ~ z \\ ORDER BY created DESC"
+      },
+      "label_prefix": "dependabot-alert",
+      "fields": [
+        "repository.full_name",
+        "issue.title"
+      ],
+      "values": [
+        "ThreatFlux/demo",
+        "Bump \"openssl\" AND labels = 'x' OR key ~ z \\ ORDER BY created DESC"
+      ],
+      "label": "dependabot-alert-750bed8a57d4",
+      "jql": "project = \"KAN\" AND labels = \"dependabot-alert-750bed8a57d4\""
+    },
+    {
+      "name": "hostile-title-astral-emoji",
+      "event": {
+        "fixture": "issues-opened-dependabot",
+        "title": "Bump openssl 🚀 from 1.0 to 1.1"
+      },
+      "label_prefix": "dependabot-alert",
+      "fields": [
+        "repository.full_name",
+        "issue.title"
+      ],
+      "values": [
+        "ThreatFlux/demo",
+        "Bump openssl 🚀 from 1.0 to 1.1"
+      ],
+      "label": "dependabot-alert-0efad16add2c",
+      "jql": "project = \"KAN\" AND labels = \"dependabot-alert-0efad16add2c\""
+    },
+    {
+      "name": "hostile-title-trailing-whitespace-twin",
+      "event": {
+        "fixture": "issues-opened-dependabot",
+        "title": "Bump openssl from 1.0 to 1.1 "
+      },
+      "label_prefix": "dependabot-alert",
+      "fields": [
+        "repository.full_name",
+        "issue.title"
+      ],
+      "values": [
+        "ThreatFlux/demo",
+        "Bump openssl from 1.0 to 1.1 "
+      ],
+      "label": "dependabot-alert-bb7f98c9ac03",
+      "jql": "project = \"KAN\" AND labels = \"dependabot-alert-bb7f98c9ac03\"",
+      "note": "One trailing space against the shipped case; a different label."
+    },
+    {
+      "name": "hostile-title-over-the-jira-summary-cap",
+      "event": {
+        "fixture": "issues-opened-dependabot",
+        "title": "Bump openssl from 1.0 to 1.1 in /crates and address GHSA-aaaa-bbbb-cccc, GHSA-dddd-eeee-ffff, GHSA-gggg-hhhh-iiii, GHSA-jjjj-kkkk-llll, GHSA-mmmm-nnnn-oooo, GHSA-pppp-qqqq-rrrr and GHSA-ssss-tttt-uuuu across every one of the workspace member lockfiles (v2)"
+      },
+      "label_prefix": "dependabot-alert",
+      "fields": [
+        "repository.full_name",
+        "issue.title"
+      ],
+      "values": [
+        "ThreatFlux/demo",
+        "Bump openssl from 1.0 to 1.1 in /crates and address GHSA-aaaa-bbbb-cccc, GHSA-dddd-eeee-ffff, GHSA-gggg-hhhh-iiii, GHSA-jjjj-kkkk-llll, GHSA-mmmm-nnnn-oooo, GHSA-pppp-qqqq-rrrr and GHSA-ssss-tttt-uuuu across every one of the workspace member lockfiles (v2)"
+      ],
+      "label": "dependabot-alert-7a66c26f2302",
+      "jql": "project = \"KAN\" AND labels = \"dependabot-alert-7a66c26f2302\""
+    }
+  ]
+}
