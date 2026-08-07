@@ -286,6 +286,7 @@ jobs:
         run: |
           if [[ "${{ needs.audit.result }}" != "success" || \
                 "${{ needs.deny.result }}" != "success" || \
+                "${{ needs.supply-chain.result }}" != "success" || \
                 "${{ needs.secrets.result }}" != "success" ]]; then
             echo "Security checks failed"
             exit 1
