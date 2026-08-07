@@ -188,6 +188,7 @@ jobs:
 
       - name: Build (native)
         if: "!matrix.use_cross"
+        shell: bash
         run: cargo build --release --target ${{ matrix.target }} -p ${{ env.CLI_PACKAGE }} --bin ${{ env.BINARY_NAME }} --all-features
 
       - name: Package (Unix)
@@ -206,8 +207,10 @@ jobs:
         run: |
           mkdir dist
           Copy-Item "target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}.exe" dist/
-          Compress-Archive -Path dist/* -DestinationPath "${{ env.BINARY_NAME }}-${{ matrix.artifact }}.zip"
-          Get-FileHash "${{ env.BINARY_NAME }}-${{ matrix.artifact }}.zip" -Algorithm SHA256 | Format-List
+          $archive = "${{ env.BINARY_NAME }}-${{ matrix.artifact }}.zip"
+          Compress-Archive -Path dist/* -DestinationPath $archive
+          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
+          "$hash  $archive" | Out-File -Encoding ascii "$archive.sha256"
 
       - name: Upload artifacts (Unix)
         if: runner.os != 'Windows'
@@ -222,7 +225,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-${{ matrix.artifact }}
-          path: "*.zip"
+          path: "*.zip*"
           retention-days: 5
 
   # ==========================================================================
