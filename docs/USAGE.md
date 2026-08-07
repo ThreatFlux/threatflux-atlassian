@@ -27,18 +27,32 @@ exact package provenance matters.
 
 ## Direct Jira REST Usage
 
+<!-- BEGIN ENV_VARS -->
 Required environment variables:
 
-- `JIRA_URL`
+- `JIRA_URL` (HTTPS only; the requirement does not depend on any other variable)
 - `JIRA_USERNAME`
 - `JIRA_API_TOKEN`
 
 Optional environment variables:
 
 - `JIRA_TIMEOUT` (60 seconds by default)
-- `JIRA_VERIFY_SSL` (`true` by default)
-- `JIRA_CERT_PATH` (one PEM or DER trust root)
+- `JIRA_HOST_POLICY` (`atlassian-cloud` by default; `allowlist:<host>[,<host>]` for Data Center; `loopback` is refused)
+- `JIRA_VERIFY_SSL` (`true`; only values meaning *enabled* are accepted, and one meaning *disabled* is a hard error)
 - `JIRA_MAX_RETRIES` (stored as `3` by default, but no automatic retries occur)
+<!-- END ENV_VARS -->
+
+`JIRA_VERIFY_SSL` covers certificate verification only and never the scheme. HTTPS is required whatever it is set to;
+the one `http://` destination the SDK admits is a literal loopback address under `HostPolicy::Loopback`, which is a code
+call (`AtlassianConfigBuilder::host_policy`) that no environment variable can reach. Certificate verification itself is
+relaxed only by `AtlassianConfigBuilder::verify_ssl(false)`, and only for an `https://` URL.
+
+There is no `JIRA_CERT_PATH`: a custom trust root can vouch for whatever host the same environment named in `JIRA_URL`,
+so it is settable only in code (`AtlassianConfig::with_cert_path`) or, for the CLI, with `--cert-path`.
+
+`JIRA_HOST_POLICY` decides where the credential may be sent, and an environment that can set it can widen the allowlist
+to an arbitrary `https` host. The default is a safe default rather than a containment boundary against a hostile
+environment; pin it wherever the API token is pinned.
 
 The direct client targets Jira Cloud REST API v2, uses Basic auth with the account email and API token, and disables
 system proxy discovery. See the [configuration reference](SDK_CONFIGURATION.md) for exact precedence, encrypted inputs,

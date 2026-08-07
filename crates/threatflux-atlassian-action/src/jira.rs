@@ -107,7 +107,7 @@ pub fn build_dedupe_jql(rule: &RuleConfig, dedupe_label: &str) -> String {
 mod tests {
     use super::{build_create_issue_request, build_dedupe_jql, try_build_dedupe_jql};
     use crate::config::{is_forbidden_jira_text_char, load_config_from_str, RuleConfig};
-    use crate::github::{load_issue_event_from_str, Actor, GitHubIssueEvent, Issue, Repository};
+    use crate::github::{load_issue_event_from_str, GitHubIssueEvent};
     use crate::rules::{evaluate_rule, RuleMatch};
     use threatflux_atlassian_testkit::fixtures;
 
@@ -464,20 +464,7 @@ rules:
     fn build_create_issue_request_errors_when_rendered_summary_is_empty() {
         let config = load_config_from_str(fixtures::action_config("jira-summary-from-body"))
             .expect("config should load");
-        let event = GitHubIssueEvent {
-            action: "opened".to_string(),
-            issue: Issue {
-                title: "Bump foo".to_string(),
-                body: Some(String::new()),
-                html_url: "https://github.com/ThreatFlux/demo/issues/1".to_string(),
-                user: Actor {
-                    login: "dependabot[bot]".to_string(),
-                },
-            },
-            repository: Repository {
-                full_name: "ThreatFlux/demo".to_string(),
-            },
-        };
+        let event = event_with_body("");
         let matched = RuleMatch {
             rule_id: "dependabot-high-issues".to_string(),
             severity: "high".to_string(),

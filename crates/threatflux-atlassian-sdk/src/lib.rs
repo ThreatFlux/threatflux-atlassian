@@ -55,6 +55,19 @@
 //! reqwest's dangerous invalid-certificate option and should be limited to controlled
 //! local testing.
 //!
+//! ## Credentials
+//!
+//! Every credential this crate holds — the API token, an OAuth access or refresh
+//! token, a PKCE code verifier, an authorization code — is a [`SecretString`],
+//! which renders `<redacted>` under both `Debug` and `Display`, has no
+//! `Serialize` implementation, and zeroes its buffer on drop. Read one with
+//! [`SecretString::expose_secret`], which is named so that searching for
+//! `expose_secret` enumerates every read site.
+//!
+//! [`AtlassianConfig`] is neither `Serialize` nor `Deserialize` for the same
+//! reason: a configuration that can be serialized is a configuration whose token
+//! can be written to a log or a file.
+//!
 //! ## Legacy Remote MCP warning
 //!
 //! [`AtlassianRemoteClient`] is retained for compatibility and migration assessment,
@@ -72,10 +85,11 @@
 // Re-export main types for convenience
 pub use auth::{AccessToken, AuthManager, AuthorizationResponse, McpAuthHandler, OAuthConfig};
 pub use client::AtlassianClient;
-pub use config::{AtlassianConfig, AtlassianConfigBuilder};
-pub use error::{AtlassianError, Result};
+pub use config::{AtlassianConfig, AtlassianConfigBuilder, HostPolicy};
+pub use error::{AtlassianError, DiagnosticsPolicy, ResponseDiagnostics, Result};
 pub use jql::{JqlBuilder, JqlError, JqlOrder};
 pub use remote_client::AtlassianRemoteClient;
+pub use secret::SecretString;
 pub use types::*;
 
 // Internal modules
@@ -85,6 +99,7 @@ pub mod config;
 pub mod error;
 pub mod jql;
 pub mod remote_client;
+pub mod secret;
 pub mod types;
 
 // Re-export commonly used external types

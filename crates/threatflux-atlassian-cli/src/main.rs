@@ -19,7 +19,8 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::{self, json};
 use threatflux_atlassian_sdk::{
-    AtlassianClient, AtlassianConfig, CreateIssueRequest, JiraField, JqlBuilder, UpdateIssueRequest,
+    AtlassianClient, AtlassianConfig, CreateIssueRequest, HostPolicy, JiraField, JqlBuilder,
+    SecretString, UpdateIssueRequest,
 };
 use tracing::Level;
 
@@ -43,14 +44,36 @@ struct Cli {
     #[arg(long)]
     username: Option<String>,
     /// Provide the Jira API token (overrides environment configuration).
+    ///
+    /// `Cli` derives `Debug`, so this being a `SecretString` is what keeps a
+    /// `{:?}` of the parsed arguments — in a log line, in a panic payload — from
+    /// printing the token.
     #[arg(long)]
-    api_token: Option<String>,
+    api_token: Option<SecretString>,
     /// Request timeout in seconds.
     #[arg(long)]
     timeout: Option<u64>,
-    /// Disable TLS certificate verification.
+    /// Disable TLS certificate verification on an `https://` URL.
+    ///
+    /// Certificate verification only. This no longer admits an `http://` base
+    /// URL; pointing the CLI at a local mock needs `--host-policy loopback`.
     #[arg(long, default_value_t = false)]
     insecure: bool,
+    /// Restrict which hosts the credentials may be sent to.
+    ///
+    /// `atlassian-cloud` (the default), `allowlist:<host>[,<host>]` for a Data
+    /// Center deployment, or `loopback` for a local mock over `http://`.
+    #[arg(long, value_name = "POLICY")]
+    host_policy: Option<HostPolicy>,
+    /// Add one PEM or DER certificate as an extra trust root.
+    ///
+    /// This is the flag that replaced `JIRA_CERT_PATH`. An extra root can vouch
+    /// for whatever host the base URL names, so installing one relaxes
+    /// certificate verification for that destination — which the SDK reserves
+    /// for an explicit code call, exactly as it does `loopback`. A command line
+    /// is that call; a workflow environment is not.
+    #[arg(long, value_name = "PATH")]
+    cert_path: Option<PathBuf>,
     /// Custom user-agent string for requests.
     #[arg(long)]
     user_agent: Option<String>,
@@ -256,7 +279,7 @@ enum Commands {
         #[arg(long, value_name = "PEM", conflicts_with = "public_key_path")]
         public_key_inline: Option<String>,
         #[arg(long, value_name = "SECRET", conflicts_with_all = ["secret_file", "secret_env"])]
-        secret: Option<String>,
+        secret: Option<SecretString>,
         #[arg(long, value_name = "PATH", conflicts_with_all = ["secret", "secret_env"])]
         secret_file: Option<PathBuf>,
         #[arg(long, value_name = "NAME", conflicts_with_all = ["secret", "secret_file"])]
@@ -657,6 +680,21 @@ fn build_config(cli: &Cli) -> Result<AtlassianConfig> {
         config.user_agent.clone_from(agent);
     }
 
+    // Set after `from_env_with_overrides`, which refuses `loopback` outright, so
+    // the hatch stays reachable from an operator's command line and not from the
+    // process environment.
+    if let Some(policy) = &cli.host_policy {
+        config.host_policy = policy.clone();
+    }
+
+    // Same rule, same reason: `from_env_with_overrides` does not read
+    // `JIRA_CERT_PATH` at all, because an extra trust anchor relaxes certificate
+    // verification for the destination the same environment chose. A flag is a
+    // code call the operator made deliberately.
+    if let Some(path) = &cli.cert_path {
+        config.cert_path = Some(path.clone());
+    }
+
     if cli.insecure {
         config.verify_ssl = false;
     }
@@ -711,7 +749,7 @@ fn handle_keygen(
 fn handle_secret_encrypt(
     public_key_path: Option<PathBuf>,
     public_key_inline: Option<String>,
-    secret: Option<String>,
+    secret: Option<SecretString>,
     secret_file: Option<PathBuf>,
     secret_env: Option<String>,
     output: Option<PathBuf>,
@@ -729,7 +767,7 @@ fn handle_secret_encrypt(
     let secret_value = resolve_secret(secret, secret_file, secret_env)?;
     let cipher = HybridCipher::new(FluxConfig::default());
     let ciphertext = cipher
-        .encrypt(&public_key, secret_value.as_bytes())
+        .encrypt(&public_key, secret_value.expose_secret().as_bytes())
         .map_err(|err| anyhow!("failed to encrypt secret: {err}"))?;
 
     let encoded = BASE64_ENGINE.encode(ciphertext);
@@ -745,31 +783,31 @@ fn handle_secret_encrypt(
 }
 
 fn resolve_secret(
-    secret: Option<String>,
+    secret: Option<SecretString>,
     secret_file: Option<PathBuf>,
     secret_env: Option<String>,
-) -> Result<String> {
+) -> Result<SecretString> {
     if let Some(value) = secret {
         return normalize_secret(&value);
     }
 
     if let Some(path) = secret_file {
         let contents = read_text_file(&path, "secret")?;
-        return normalize_secret(&contents);
+        return normalize_secret(&SecretString::from(contents));
     }
 
     let env_name = secret_env.unwrap_or_else(|| "JIRA_API_TOKEN".to_string());
     let value = env::var(&env_name)
         .with_context(|| format!("failed to read secret from env {env_name}"))?;
-    normalize_secret(&value)
+    normalize_secret(&SecretString::from(value))
 }
 
-fn normalize_secret(value: &str) -> Result<String> {
-    let trimmed = value.trim();
+fn normalize_secret(value: &SecretString) -> Result<SecretString> {
+    let trimmed = value.trimmed();
     if trimmed.is_empty() {
         bail!("Secret value cannot be empty");
     }
-    Ok(trimmed.to_string())
+    Ok(trimmed)
 }
 
 /// Builds the query behind `project-issues`. Only `issue-search` takes JQL from
@@ -842,6 +880,7 @@ fn print_json<T: Serialize>(value: &T) -> Result<()> {
 mod tests {
     use super::{normalize_comment, normalize_secret, project_issues_jql, Cli, Commands};
     use clap::Parser;
+    use threatflux_atlassian_sdk::SecretString;
 
     #[test]
     fn project_issues_jql_quotes_the_project_key() {
@@ -886,14 +925,24 @@ mod tests {
 
     #[test]
     fn normalize_secret_trims_surrounding_whitespace() {
-        assert_eq!(normalize_secret("  token  ").unwrap(), "token");
-        assert_eq!(normalize_secret("token\n").unwrap(), "token");
+        assert_eq!(
+            normalize_secret(&SecretString::from("  token  "))
+                .unwrap()
+                .expose_secret(),
+            "token"
+        );
+        assert_eq!(
+            normalize_secret(&SecretString::from("token\n"))
+                .unwrap()
+                .expose_secret(),
+            "token"
+        );
     }
 
     #[test]
     fn normalize_secret_rejects_blank_values() {
-        assert!(normalize_secret("").is_err());
-        assert!(normalize_secret(" \t\n ").is_err());
+        assert!(normalize_secret(&SecretString::from("")).is_err());
+        assert!(normalize_secret(&SecretString::from(" \t\n ")).is_err());
     }
 
     #[test]
@@ -969,5 +1018,51 @@ mod tests {
             "--unassign",
         ])
         .is_err());
+    }
+
+    #[test]
+    fn the_api_token_argument_parses_into_the_secret_type() {
+        let cli = Cli::try_parse_from([
+            "tflux-atlassian",
+            "--api-token",
+            "s3cr3t-api-token",
+            "profile",
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli.api_token.as_ref().unwrap().expose_secret(),
+            "s3cr3t-api-token"
+        );
+    }
+
+    #[test]
+    fn a_debug_of_the_parsed_arguments_does_not_print_the_token() {
+        // `Cli` and `Commands` both derive `Debug`, and `--api-token` and
+        // `secret-encrypt --secret` are the two places a credential arrives on a
+        // command line.
+        let cli = Cli::try_parse_from([
+            "tflux-atlassian",
+            "--api-token",
+            "s3cr3t-api-token",
+            "secret-encrypt",
+            "--public-key-inline",
+            "PUBLIC KEY PEM",
+            "--secret",
+            "s3cr3t-plaintext",
+        ])
+        .unwrap();
+
+        let rendered = format!("{cli:?}");
+
+        assert!(
+            !rendered.contains("s3cr3t-api-token"),
+            "rendered: {rendered}"
+        );
+        assert!(
+            !rendered.contains("s3cr3t-plaintext"),
+            "rendered: {rendered}"
+        );
+        assert!(rendered.contains("PUBLIC KEY PEM"), "rendered: {rendered}");
     }
 }

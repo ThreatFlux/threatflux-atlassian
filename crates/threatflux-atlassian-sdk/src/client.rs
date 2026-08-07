@@ -4,13 +4,17 @@
 //! including authentication, ticket operations, and project management.
 
 use crate::config::AtlassianConfig;
-use crate::error::{AtlassianError, Result};
+use crate::error::{
+    map_error_response, AtlassianError, DiagnosticsPolicy, FailureContext, FailureShape, Result,
+};
 use crate::jql::JqlBuilder;
+use crate::secret::zeroize_string;
 use crate::types::{
     CreateIssueRequest, IssueSearchResult, IssueTransition, IssueTransitionsResponse, JiraField,
     JiraIssue, JiraUser, Project, UpdateIssueRequest,
 };
 use base64::prelude::*;
+use reqwest::header::HeaderValue;
 use reqwest::{multipart, Certificate, Client, ClientBuilder, Method, Response};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -19,51 +23,138 @@ use std::fs;
 use std::path::Path;
 use tokio::fs as tokio_fs;
 use tracing::{debug, error, info, warn};
+use url::Url;
 
 #[derive(Debug, Deserialize)]
 struct CreateIssueResponse {
     key: String,
 }
 
-/// Main client for Atlassian/Jira API operations
-#[derive(Debug)]
-pub struct AtlassianClient {
-    /// HTTP client for making requests
-    client: Client,
-    /// Configuration settings
-    config: AtlassianConfig,
+/// Longest prefix of a caller-supplied value that may reach a log line.
+const PREVIEW_LIMIT: usize = 48;
+
+/// A bounded, escaped preview of a value this crate did not author.
+///
+/// Two properties, both of which a bare `{}` loses. The bound keeps an
+/// unbounded value — a JQL query carrying a rendered issue body, a 32 KiB
+/// summary — from being copied wholesale into a log sink that outlives the run
+/// and is readable by anyone with the workflow log. The `{:?}` escaping keeps a
+/// newline inside that value from ending the log line and forging the next one.
+fn preview(value: &str) -> String {
+    let truncated: String = value.chars().take(PREVIEW_LIMIT).collect();
+    if truncated.len() == value.len() {
+        format!("{truncated:?}")
+    } else {
+        format!("{truncated:?} (truncated)")
+    }
 }
 
-impl AtlassianClient {
-    /// Create a new Atlassian client
-    ///
-    /// # Arguments
-    /// * `config` - Configuration with Jira URL, credentials, and settings
-    ///
-    /// # Example
-    /// ```rust,no_run
-    /// use threatflux_atlassian_sdk::{AtlassianClient, AtlassianConfig};
-    ///
-    /// # tokio_test::block_on(async {
-    /// let config = AtlassianConfig::new(
-    ///     "https://company.atlassian.net".to_string(),
-    ///     "user@company.com".to_string(),
-    ///     "api-token".to_string()
-    /// ).unwrap();
-    /// let client = AtlassianClient::new(config).unwrap();
-    /// # });
-    /// ```
-    pub fn new(config: AtlassianConfig) -> Result<Self> {
-        config.validate()?;
+/// Whether replaying a request can duplicate a server-side effect.
+///
+/// Every routed call records one of these so the retry work has a per-operation
+/// input instead of inferring safety from the HTTP method. Nothing branches on it
+/// yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Idempotency {
+    /// Reads, and writes that set a value rather than append one: a replay
+    /// converges on the same server state.
+    Safe,
+    /// Writes that append. A replay creates a second issue, comment, link, or
+    /// attachment.
+    UnsafeWrite,
+}
 
+/// The request body, which decides which content type the request carries.
+#[derive(Debug)]
+enum Payload<'a> {
+    /// No body. Kept distinct from an empty JSON body so the request is byte-identical
+    /// to what the endpoint expects.
+    Empty,
+    /// A JSON document.
+    Json(&'a Value),
+    /// A multipart form, which owns its parts and therefore cannot be borrowed.
+    Multipart(Box<multipart::Form>),
+}
+
+/// One outbound Jira API call, described independently of how it is sent.
+///
+/// The path arrives as already-split segments rather than a joined string: each one
+/// is percent-encoded on its own, so a caller-supplied identifier can never introduce
+/// a path boundary.
+#[derive(Debug)]
+pub(crate) struct TransportRequest<'a> {
+    method: Method,
+    segments: &'a [&'a str],
+    idempotency: Idempotency,
+    query: Option<&'a HashMap<String, String>>,
+    payload: Payload<'a>,
+}
+
+impl<'a> TransportRequest<'a> {
+    /// Describe a request to the API path formed by `segments`.
+    pub(crate) const fn new(
+        method: Method,
+        segments: &'a [&'a str],
+        idempotency: Idempotency,
+    ) -> Self {
+        Self {
+            method,
+            segments,
+            idempotency,
+            query: None,
+            payload: Payload::Empty,
+        }
+    }
+
+    /// Attach a JSON request body.
+    pub(crate) fn json(mut self, body: &'a Value) -> Self {
+        self.payload = Payload::Json(body);
+        self
+    }
+
+    /// Attach a multipart form body.
+    pub(crate) fn multipart(mut self, form: multipart::Form) -> Self {
+        self.payload = Payload::Multipart(Box::new(form));
+        self
+    }
+
+    /// Attach query parameters, which reqwest percent-encodes.
+    pub(crate) const fn query(mut self, params: &'a HashMap<String, String>) -> Self {
+        self.query = Some(params);
+        self
+    }
+
+    /// The replay class recorded for this call.
+    pub(crate) const fn idempotency(&self) -> Idempotency {
+        self.idempotency
+    }
+}
+
+/// Authenticated HTTP plumbing shared by every Jira endpoint.
+///
+/// This is the single place that resolves an API path against the configured base
+/// URL, applies credentials, and maps a failure response onto [`AtlassianError`].
+#[derive(Debug, Clone)]
+pub(crate) struct Transport {
+    client: Client,
+    config: AtlassianConfig,
+    diagnostics: DiagnosticsPolicy,
+}
+
+impl Transport {
+    /// Build the HTTP client described by `config`.
+    fn new(config: AtlassianConfig) -> Result<Self> {
         let mut client_builder = ClientBuilder::new()
             .timeout(config.timeout)
             .user_agent(&config.user_agent)
             .no_proxy();
 
-        // Handle SSL certificate configuration
-        if !config.verify_ssl {
-            warn!("SSL verification is disabled - not recommended for production");
+        // Certificate verification is a property of a TLS handshake, so relaxing
+        // it is scoped to the scheme that performs one. On an `http://` base URL
+        // reqwest never negotiates TLS, and `danger_accept_invalid_certs(true)`
+        // was a no-op that read like a downgrade.
+        if !config.verify_ssl && config.base_url.scheme() == "https" {
+            warn!("TLS certificate verification is disabled - not recommended for production");
             client_builder = client_builder.danger_accept_invalid_certs(true);
         }
 
@@ -89,7 +180,187 @@ impl AtlassianClient {
             .build()
             .map_err(|e| AtlassianError::config(format!("Failed to create HTTP client: {e}")))?;
 
-        Ok(Self { client, config })
+        Ok(Self {
+            client,
+            config,
+            diagnostics: DiagnosticsPolicy::default(),
+        })
+    }
+
+    /// Build the `Authorization: Basic` header for the configured credentials.
+    ///
+    /// The returned value is marked sensitive, which is what keeps reqwest and
+    /// hyper from printing it in their own `Debug` output and error text — a
+    /// `HeaderMap` renders a sensitive value as `Sensitive` and nothing else.
+    /// That covers the `username:token` blob, which is the credential in another
+    /// encoding and which no amount of redaction on [`crate::SecretString`]
+    /// reaches once base64 has been applied to it.
+    fn authorization_header(&self) -> Result<HeaderValue> {
+        let mut credentials = format!(
+            "{}:{}",
+            self.config.username,
+            self.config.api_token.expose_secret()
+        );
+        let mut encoded = BASE64_STANDARD.encode(&credentials);
+        zeroize_string(&mut credentials);
+
+        let mut rendered = format!("Basic {encoded}");
+        zeroize_string(&mut encoded);
+
+        // Base64 emits only header-safe ASCII, so this cannot fail for any
+        // username or token; it is mapped rather than unwrapped so that no
+        // credential can reach a panic payload.
+        let header = HeaderValue::from_str(&rendered);
+        zeroize_string(&mut rendered);
+
+        let mut header = header.map_err(|_| {
+            AtlassianError::config("Jira credentials cannot be encoded as an HTTP header")
+        })?;
+        header.set_sensitive(true);
+        Ok(header)
+    }
+
+    /// Resolve API path `segments` below the configured base URL.
+    ///
+    /// Segments are appended, never resolved: a Data Center context path in the base
+    /// URL is preserved, and each segment is percent-encoded on its own so a
+    /// caller-supplied identifier cannot escape the API path.
+    ///
+    /// The [`crate::HostPolicy`] is applied to the **joined** URL rather than to the base,
+    /// so the destination that is checked is the destination that is dialled. Every
+    /// endpoint reaches the wire through here, `add_issue_attachment` — whose
+    /// multipart body kept it off the shared path for a while — included.
+    pub(crate) fn build_url(&self, segments: &[&str]) -> Result<Url> {
+        for segment in segments {
+            Self::validate_segment(segment)?;
+        }
+
+        let mut url = self.config.base_url.clone();
+        {
+            let mut path = url.path_segments_mut().map_err(|()| {
+                AtlassianError::config(format!(
+                    "Jira base URL scheme '{}' cannot carry an API path",
+                    self.config.base_url.scheme()
+                ))
+            })?;
+            // A base URL always ends in at least "/", whose empty trailing segment
+            // would otherwise become a "//" in the joined path.
+            path.pop_if_empty();
+            path.extend(segments);
+        }
+
+        self.config.host_policy.check_destination(&url)?;
+
+        Ok(url)
+    }
+
+    /// Reject the segments `Url` would silently rewrite rather than encode.
+    ///
+    /// `path_segments_mut` drops `.` and `..` outright and strips CR, LF, and TAB,
+    /// so any of them would address a different resource than the caller named.
+    fn validate_segment(segment: &str) -> Result<()> {
+        if segment.is_empty() {
+            return Err(AtlassianError::validation(
+                "Jira API path segment cannot be empty",
+            ));
+        }
+
+        if segment == "." || segment == ".." {
+            return Err(AtlassianError::validation(format!(
+                "Jira API path segment cannot be the relative segment {segment:?}"
+            )));
+        }
+
+        if segment.chars().any(char::is_control) {
+            return Err(AtlassianError::validation(
+                "Jira API path segment cannot contain control characters",
+            ));
+        }
+
+        Ok(())
+    }
+
+    async fn ensure_success(&self, response: Response) -> Result<Response> {
+        if response.status().is_success() {
+            return Ok(response);
+        }
+
+        Err(map_error_response(
+            response,
+            FailureContext::new(FailureShape::JiraRest, "Jira API request", self.diagnostics),
+        )
+        .await)
+    }
+
+    /// Send an authenticated request and map a failure response onto an error.
+    pub(crate) async fn send(&self, request: TransportRequest<'_>) -> Result<Response> {
+        let url = self.build_url(request.segments)?;
+
+        debug!(
+            "Making {} request to: {} ({:?})",
+            request.method,
+            url,
+            request.idempotency()
+        );
+
+        let mut builder = self
+            .client
+            .request(request.method, url)
+            .header("Authorization", self.authorization_header()?)
+            .header("Accept", "application/json");
+
+        if let Some(params) = request.query {
+            builder = builder.query(params);
+        }
+
+        builder = match request.payload {
+            Payload::Empty => builder.header("Content-Type", "application/json"),
+            Payload::Json(body) => builder
+                .header("Content-Type", "application/json")
+                .json(body),
+            // Jira rejects an attachment upload that does not opt out of its XSRF
+            // check, and reqwest owns the multipart content type and its boundary.
+            Payload::Multipart(form) => builder
+                .header("X-Atlassian-Token", "no-check")
+                .multipart(*form),
+        };
+
+        self.ensure_success(builder.send().await?).await
+    }
+}
+
+/// Main client for Atlassian/Jira API operations
+#[derive(Debug)]
+pub struct AtlassianClient {
+    /// Authenticated HTTP plumbing and the configuration it was built from
+    transport: Transport,
+}
+
+impl AtlassianClient {
+    /// Create a new Atlassian client
+    ///
+    /// # Arguments
+    /// * `config` - Configuration with Jira URL, credentials, and settings
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// use threatflux_atlassian_sdk::{AtlassianClient, AtlassianConfig};
+    ///
+    /// # tokio_test::block_on(async {
+    /// let config = AtlassianConfig::new(
+    ///     "https://company.atlassian.net".to_string(),
+    ///     "user@company.com".to_string(),
+    ///     "api-token".to_string()
+    /// ).unwrap();
+    /// let client = AtlassianClient::new(config).unwrap();
+    /// # });
+    /// ```
+    pub fn new(config: AtlassianConfig) -> Result<Self> {
+        config.validate()?;
+
+        Ok(Self {
+            transport: Transport::new(config)?,
+        })
     }
 
     /// Create client from environment variables
@@ -98,78 +369,31 @@ impl AtlassianClient {
         Self::new(config)
     }
 
-    fn authorization_header(&self) -> String {
-        let auth = BASE64_STANDARD.encode(format!(
-            "{}:{}",
-            self.config.username, self.config.api_token
-        ));
-        format!("Basic {auth}")
+    /// Choose how much of a failing Jira response may reach the errors this client returns.
+    ///
+    /// The default is [`DiagnosticsPolicy::MetadataOnly`], under which a Jira
+    /// response body is never read. Widening the policy is a decision about where
+    /// this process's errors end up — a workflow log, a Jira comment, an exception
+    /// report — and is deliberately not reachable from the environment.
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// use threatflux_atlassian_sdk::error::DiagnosticsPolicy;
+    /// use threatflux_atlassian_sdk::AtlassianClient;
+    ///
+    /// let client = AtlassianClient::from_env()
+    ///     .unwrap()
+    ///     .with_diagnostics(DiagnosticsPolicy::JiraErrorFields);
+    /// ```
+    #[must_use]
+    pub const fn with_diagnostics(mut self, policy: DiagnosticsPolicy) -> Self {
+        self.transport.diagnostics = policy;
+        self
     }
 
-    async fn ensure_success(response: Response) -> Result<Response> {
-        if response.status().is_success() {
-            return Ok(response);
-        }
-
-        let status = response.status();
-        let error_text = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unknown error".to_string());
-        error!(
-            "Jira API request failed with status {}: {}",
-            status, error_text
-        );
-
-        Err(match status.as_u16() {
-            401 => AtlassianError::auth("Invalid credentials or API token"),
-            403 => AtlassianError::PermissionDenied {
-                message: "Insufficient permissions for this operation".to_string(),
-            },
-            404 => AtlassianError::NotFound {
-                message: "Resource not found".to_string(),
-            },
-            429 => AtlassianError::RateLimit {
-                message: "Rate limit exceeded".to_string(),
-            },
-            _ => AtlassianError::jira_api(
-                format!("API request failed: {error_text}"),
-                Some(i32::from(status.as_u16())),
-            ),
-        })
-    }
-
-    /// Make an authenticated HTTP request to the Jira API
-    async fn make_request(
-        &self,
-        method: Method,
-        endpoint: &str,
-        body: Option<&Value>,
-        query_params: Option<&HashMap<String, String>>,
-    ) -> Result<Response> {
-        let url = self
-            .config
-            .base_url
-            .join(endpoint.trim_start_matches('/'))?;
-
-        debug!("Making {} request to: {}", method, url);
-
-        let mut request = self
-            .client
-            .request(method, url)
-            .header("Authorization", self.authorization_header())
-            .header("Content-Type", "application/json")
-            .header("Accept", "application/json");
-
-        if let Some(params) = query_params {
-            request = request.query(params);
-        }
-
-        if let Some(json_body) = body {
-            request = request.json(json_body);
-        }
-
-        Self::ensure_success(request.send().await?).await
+    /// The response-diagnostics policy in force for this client.
+    pub const fn diagnostics(&self) -> DiagnosticsPolicy {
+        self.transport.diagnostics
     }
 
     /// Get issue by key or ID
@@ -190,13 +414,21 @@ impl AtlassianClient {
     pub async fn get_issue(&self, issue_key: &str) -> Result<JiraIssue> {
         info!("Getting issue: {}", issue_key);
 
-        let endpoint = format!("/rest/api/2/issue/{issue_key}");
         let response = self
-            .make_request(Method::GET, &endpoint, None, None)
+            .transport
+            .send(TransportRequest::new(
+                Method::GET,
+                &["rest", "api", "2", "issue", issue_key],
+                Idempotency::Safe,
+            ))
             .await?;
 
         let issue: JiraIssue = response.json().await?;
-        debug!("Retrieved issue: {} - {}", issue.key, issue.fields.summary);
+        debug!(
+            "Retrieved issue: {} - {}",
+            issue.key,
+            preview(&issue.fields.summary)
+        );
 
         Ok(issue)
     }
@@ -227,12 +459,19 @@ impl AtlassianClient {
     ) -> Result<()> {
         info!("Updating issue: {} with {} fields", issue_key, fields.len());
 
-        let endpoint = format!("/rest/api/2/issue/{issue_key}");
         let update_request = UpdateIssueRequest { fields };
         let body = serde_json::to_value(&update_request)?;
 
         let response = self
-            .make_request(Method::PUT, &endpoint, Some(&body), None)
+            .transport
+            .send(
+                TransportRequest::new(
+                    Method::PUT,
+                    &["rest", "api", "2", "issue", issue_key],
+                    Idempotency::Safe,
+                )
+                .json(&body),
+            )
             .await?;
 
         // Jira returns 204 No Content for successful updates
@@ -255,10 +494,17 @@ impl AtlassianClient {
         }
 
         info!("Adding comment to issue: {}", issue_key);
-        let endpoint = format!("/rest/api/2/issue/{issue_key}/comment");
         let payload = json!({ "body": body });
         let response = self
-            .make_request(Method::POST, &endpoint, Some(&payload), None)
+            .transport
+            .send(
+                TransportRequest::new(
+                    Method::POST,
+                    &["rest", "api", "2", "issue", issue_key, "comment"],
+                    Idempotency::UnsafeWrite,
+                )
+                .json(&payload),
+            )
             .await?;
         Ok(response.json().await?)
     }
@@ -271,12 +517,19 @@ impl AtlassianClient {
         max_results: u32,
     ) -> Result<Value> {
         info!("Listing comments for issue: {}", issue_key);
-        let endpoint = format!("/rest/api/2/issue/{issue_key}/comment");
         let mut params = HashMap::new();
         params.insert("startAt".to_string(), start_at.to_string());
         params.insert("maxResults".to_string(), max_results.to_string());
         let response = self
-            .make_request(Method::GET, &endpoint, None, Some(&params))
+            .transport
+            .send(
+                TransportRequest::new(
+                    Method::GET,
+                    &["rest", "api", "2", "issue", issue_key, "comment"],
+                    Idempotency::Safe,
+                )
+                .query(&params),
+            )
             .await?;
         Ok(response.json().await?)
     }
@@ -285,9 +538,16 @@ impl AtlassianClient {
     pub async fn assign_issue(&self, issue_key: &str, account_id: Option<&str>) -> Result<()> {
         let account_id = account_id.map(str::trim).filter(|value| !value.is_empty());
         info!("Updating assignee for issue: {}", issue_key);
-        let endpoint = format!("/rest/api/2/issue/{issue_key}/assignee");
         let payload = json!({ "accountId": account_id });
-        self.make_request(Method::PUT, &endpoint, Some(&payload), None)
+        self.transport
+            .send(
+                TransportRequest::new(
+                    Method::PUT,
+                    &["rest", "api", "2", "issue", issue_key, "assignee"],
+                    Idempotency::Safe,
+                )
+                .json(&payload),
+            )
             .await?;
         Ok(())
     }
@@ -310,7 +570,15 @@ impl AtlassianClient {
         params.insert("startAt".to_string(), start_at.to_string());
         params.insert("maxResults".to_string(), max_results.to_string());
         let response = self
-            .make_request(Method::GET, "/rest/api/2/user/search", None, Some(&params))
+            .transport
+            .send(
+                TransportRequest::new(
+                    Method::GET,
+                    &["rest", "api", "2", "user", "search"],
+                    Idempotency::Safe,
+                )
+                .query(&params),
+            )
             .await?;
         Ok(response.json().await?)
     }
@@ -338,7 +606,15 @@ impl AtlassianClient {
             "inwardIssue": { "key": inward_issue },
             "outwardIssue": { "key": outward_issue }
         });
-        self.make_request(Method::POST, "/rest/api/2/issueLink", Some(&payload), None)
+        self.transport
+            .send(
+                TransportRequest::new(
+                    Method::POST,
+                    &["rest", "api", "2", "issueLink"],
+                    Idempotency::UnsafeWrite,
+                )
+                .json(&payload),
+            )
             .await?;
         Ok(())
     }
@@ -353,8 +629,12 @@ impl AtlassianClient {
         }
 
         info!("Deleting issue link: {}", link_id);
-        let endpoint = format!("/rest/api/2/issueLink/{link_id}");
-        self.make_request(Method::DELETE, &endpoint, None, None)
+        self.transport
+            .send(TransportRequest::new(
+                Method::DELETE,
+                &["rest", "api", "2", "issueLink", link_id],
+                Idempotency::Safe,
+            ))
             .await?;
         Ok(())
     }
@@ -373,23 +653,19 @@ impl AtlassianClient {
         let bytes = tokio_fs::read(file_path).await?;
         let part = multipart::Part::bytes(bytes).file_name(file_name.to_string());
         let form = multipart::Form::new().part("file", part);
-        let endpoint = format!("/rest/api/2/issue/{issue_key}/attachments");
-        let url = self
-            .config
-            .base_url
-            .join(endpoint.trim_start_matches('/'))?;
 
         info!("Uploading attachment to issue: {}", issue_key);
         let response = self
-            .client
-            .post(url)
-            .header("Authorization", self.authorization_header())
-            .header("Accept", "application/json")
-            .header("X-Atlassian-Token", "no-check")
-            .multipart(form)
-            .send()
+            .transport
+            .send(
+                TransportRequest::new(
+                    Method::POST,
+                    &["rest", "api", "2", "issue", issue_key, "attachments"],
+                    Idempotency::UnsafeWrite,
+                )
+                .multipart(form),
+            )
             .await?;
-        let response = Self::ensure_success(response).await?;
         Ok(response.json().await?)
     }
 
@@ -401,12 +677,19 @@ impl AtlassianClient {
         max_results: u32,
     ) -> Result<Value> {
         info!("Getting changelog for issue: {}", issue_key);
-        let endpoint = format!("/rest/api/2/issue/{issue_key}/changelog");
         let mut params = HashMap::new();
         params.insert("startAt".to_string(), start_at.to_string());
         params.insert("maxResults".to_string(), max_results.to_string());
         let response = self
-            .make_request(Method::GET, &endpoint, None, Some(&params))
+            .transport
+            .send(
+                TransportRequest::new(
+                    Method::GET,
+                    &["rest", "api", "2", "issue", issue_key, "changelog"],
+                    Idempotency::Safe,
+                )
+                .query(&params),
+            )
             .await?;
         Ok(response.json().await?)
     }
@@ -459,13 +742,21 @@ impl AtlassianClient {
     /// unreadable response leaves an issue whose key nothing learned, which a
     /// retry would duplicate, so that case is logged.
     pub async fn create_issue_key(&self, request: CreateIssueRequest) -> Result<String> {
-        info!("Creating new issue: {}", request.fields.summary);
+        info!("Creating new issue");
+        debug!("New issue summary: {}", preview(&request.fields.summary));
 
-        let endpoint = "/rest/api/2/issue";
         let body = serde_json::to_value(&request)?;
 
         let response = self
-            .make_request(Method::POST, endpoint, Some(&body), None)
+            .transport
+            .send(
+                TransportRequest::new(
+                    Method::POST,
+                    &["rest", "api", "2", "issue"],
+                    Idempotency::UnsafeWrite,
+                )
+                .json(&body),
+            )
             .await?;
 
         let created_issue: CreateIssueResponse =
@@ -562,16 +853,28 @@ impl AtlassianClient {
         start_at: u32,
         max_results: u32,
     ) -> Result<IssueSearchResult> {
-        info!("Searching issues with JQL: {}", jql);
+        // The query is not this crate's text. A dedupe query carries the caller's
+        // label scheme, and a `summary ~` term carries whatever the event that
+        // produced it did, so the whole of it is exactly what must not land in an
+        // `info` log that a workflow publishes.
+        info!("Searching issues with a {}-character JQL query", jql.len());
+        debug!("JQL query: {}", preview(jql));
 
-        let endpoint = "/rest/api/2/search";
         let mut params = HashMap::new();
         params.insert("jql".to_string(), jql.to_string());
         params.insert("startAt".to_string(), start_at.to_string());
         params.insert("maxResults".to_string(), max_results.to_string());
 
         let response = self
-            .make_request(Method::GET, endpoint, None, Some(&params))
+            .transport
+            .send(
+                TransportRequest::new(
+                    Method::GET,
+                    &["rest", "api", "2", "search"],
+                    Idempotency::Safe,
+                )
+                .query(&params),
+            )
             .await?;
 
         let search_result: IssueSearchResult = response.json().await?;
@@ -600,8 +903,14 @@ impl AtlassianClient {
     pub async fn get_myself(&self) -> Result<JiraUser> {
         info!("Getting current user information");
 
-        let endpoint = "/rest/api/2/myself";
-        let response = self.make_request(Method::GET, endpoint, None, None).await?;
+        let response = self
+            .transport
+            .send(TransportRequest::new(
+                Method::GET,
+                &["rest", "api", "2", "myself"],
+                Idempotency::Safe,
+            ))
+            .await?;
 
         let user: JiraUser = response.json().await?;
         debug!("Current user: {:?}", user.display_name);
@@ -634,8 +943,14 @@ impl AtlassianClient {
     pub async fn get_projects(&self) -> Result<Vec<Project>> {
         info!("Getting accessible projects");
 
-        let endpoint = "/rest/api/2/project";
-        let response = self.make_request(Method::GET, endpoint, None, None).await?;
+        let response = self
+            .transport
+            .send(TransportRequest::new(
+                Method::GET,
+                &["rest", "api", "2", "project"],
+                Idempotency::Safe,
+            ))
+            .await?;
 
         let projects: Vec<Project> = response.json().await?;
         info!("Retrieved {} projects", projects.len());
@@ -661,9 +976,13 @@ impl AtlassianClient {
     pub async fn get_project(&self, project_key: &str) -> Result<Project> {
         info!("Getting project: {}", project_key);
 
-        let endpoint = format!("/rest/api/2/project/{project_key}");
         let response = self
-            .make_request(Method::GET, &endpoint, None, None)
+            .transport
+            .send(TransportRequest::new(
+                Method::GET,
+                &["rest", "api", "2", "project", project_key],
+                Idempotency::Safe,
+            ))
             .await?;
 
         let project: Project = response.json().await?;
@@ -691,8 +1010,14 @@ impl AtlassianClient {
     pub async fn get_fields(&self) -> Result<Vec<JiraField>> {
         info!("Getting all Jira fields");
 
-        let endpoint = "/rest/api/2/field";
-        let response = self.make_request(Method::GET, endpoint, None, None).await?;
+        let response = self
+            .transport
+            .send(TransportRequest::new(
+                Method::GET,
+                &["rest", "api", "2", "field"],
+                Idempotency::Safe,
+            ))
+            .await?;
 
         let fields: Vec<JiraField> = response.json().await?;
         info!("Retrieved {} fields", fields.len());
@@ -768,10 +1093,10 @@ impl AtlassianClient {
         field_id: &str,
         value: &str,
     ) -> Result<()> {
-        info!(
-            "Updating custom field {} for {} to {}",
-            field_id, issue_key, value
-        );
+        // The value is whatever the caller is writing into a Jira field, which is
+        // the one argument here that can be a credential.
+        info!("Updating custom field {} for {}", field_id, issue_key);
+        debug!("Custom field {} value: {}", field_id, preview(value));
 
         let mut fields = HashMap::new();
         fields.insert(field_id.to_string(), serde_json::json!({ "value": value }));
@@ -783,9 +1108,13 @@ impl AtlassianClient {
     pub async fn get_issue_transitions(&self, issue_key: &str) -> Result<Vec<IssueTransition>> {
         info!("Fetching transitions for issue: {}", issue_key);
 
-        let endpoint = format!("/rest/api/2/issue/{issue_key}/transitions");
         let response = self
-            .make_request(Method::GET, &endpoint, None, None)
+            .transport
+            .send(TransportRequest::new(
+                Method::GET,
+                &["rest", "api", "2", "issue", issue_key, "transitions"],
+                Idempotency::Safe,
+            ))
             .await?;
 
         let payload: IssueTransitionsResponse = response.json().await.map_err(|err| {
@@ -815,7 +1144,6 @@ impl AtlassianClient {
             issue_key, transition_id
         );
 
-        let endpoint = format!("/rest/api/2/issue/{issue_key}/transitions");
         let mut payload = json!({
             "transition": { "id": transition_id }
         });
@@ -845,7 +1173,15 @@ impl AtlassianClient {
         }
 
         let response = self
-            .make_request(Method::POST, &endpoint, Some(&payload), None)
+            .transport
+            .send(
+                TransportRequest::new(
+                    Method::POST,
+                    &["rest", "api", "2", "issue", issue_key, "transitions"],
+                    Idempotency::UnsafeWrite,
+                )
+                .json(&payload),
+            )
             .await?;
 
         if response.status().is_success() {
@@ -998,8 +1334,7 @@ impl AtlassianClient {
 impl Clone for AtlassianClient {
     fn clone(&self) -> Self {
         Self {
-            client: self.client.clone(),
-            config: self.config.clone(),
+            transport: self.transport.clone(),
         }
     }
 }
@@ -1007,8 +1342,12 @@ impl Clone for AtlassianClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::HostPolicy;
     use crate::types::{CreateIssueFields, IssueTypeReference, ProjectReference};
+    use std::future::Future;
     use std::time::Duration;
+    use threatflux_atlassian_testkit::logs;
+    use threatflux_atlassian_testkit::redaction::SecretScanner;
     use wiremock::matchers::{body_json, body_string_contains, header, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -1022,14 +1361,42 @@ mod tests {
     }
 
     fn create_mock_client(server: &MockServer) -> AtlassianClient {
+        create_mock_client_at(&server.uri())
+    }
+
+    /// A client pointed at a `http://127.0.0.1:PORT` mock.
+    ///
+    /// `HostPolicy::Loopback` is the whole reason the scheme is admitted. The
+    /// `verify_ssl(false)` this replaced never did anything here — reqwest
+    /// negotiates no TLS on an `http://` URL — it only bought past a scheme check
+    /// that was wrongly conditioned on it.
+    fn create_mock_client_at(base_url: &str) -> AtlassianClient {
         let config = AtlassianConfig::builder()
-            .base_url(server.uri())
+            .base_url(base_url)
             .username("test@example.com")
             .api_token("test-token")
-            .verify_ssl(false)
+            .host_policy(HostPolicy::Loopback)
             .build()
             .unwrap();
         AtlassianClient::new(config).unwrap()
+    }
+
+    /// A transport at an arbitrary base, for the tests that only exercise path
+    /// joining and so must not be constrained by the default host policy.
+    fn transport_at(base_url: &str) -> Transport {
+        let host = Url::parse(base_url)
+            .expect("test base URL parses")
+            .host_str()
+            .expect("test base URL names a host")
+            .to_string();
+        let config = AtlassianConfig::builder()
+            .base_url(base_url)
+            .username("test@example.com")
+            .api_token("test-token")
+            .host_policy(HostPolicy::Allowlist(vec![host]))
+            .build()
+            .unwrap();
+        Transport::new(config).unwrap()
     }
 
     #[test]
@@ -1045,8 +1412,14 @@ mod tests {
         let client = AtlassianClient::new(config).unwrap();
         let cloned_client = client.clone();
 
-        assert_eq!(client.config.base_url, cloned_client.config.base_url);
-        assert_eq!(client.config.username, cloned_client.config.username);
+        assert_eq!(
+            client.transport.config.base_url,
+            cloned_client.transport.config.base_url
+        );
+        assert_eq!(
+            client.transport.config.username,
+            cloned_client.transport.config.username
+        );
     }
 
     #[test]
@@ -1146,7 +1519,7 @@ mod tests {
             .base_url(server.uri())
             .username("test@example.com")
             .api_token("test-token")
-            .verify_ssl(false)
+            .host_policy(HostPolicy::Loopback)
             .build()
             .unwrap();
         let client = AtlassianClient::new(config).unwrap();
@@ -1517,5 +1890,690 @@ mod tests {
             .await
             .unwrap_or_default()
             .is_empty());
+    }
+
+    #[test]
+    fn test_build_url_keeps_a_data_center_context_path() {
+        // `Url::join`, which this replaced, resolves the API path against the base and
+        // drops the context path entirely.
+        for base in [
+            "https://jira.example.com/jira",
+            "https://jira.example.com/jira/",
+        ] {
+            let url = transport_at(base)
+                .build_url(&["rest", "api", "2", "issue", "KAN-1"])
+                .unwrap();
+
+            assert_eq!(
+                url.as_str(),
+                "https://jira.example.com/jira/rest/api/2/issue/KAN-1",
+                "context path dropped for base {base}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_build_url_keeps_a_multi_element_context_path() {
+        let url = transport_at("https://jira.example.com/apps/jira/")
+            .build_url(&["rest", "api", "2", "myself"])
+            .unwrap();
+
+        assert_eq!(
+            url.as_str(),
+            "https://jira.example.com/apps/jira/rest/api/2/myself"
+        );
+    }
+
+    #[test]
+    fn test_build_url_leaves_a_bare_host_base_unchanged() {
+        for base in ["https://test.atlassian.net", "https://test.atlassian.net/"] {
+            let url = transport_at(base)
+                .build_url(&["rest", "api", "2", "issue", "KAN-1"])
+                .unwrap();
+
+            assert_eq!(
+                url.as_str(),
+                "https://test.atlassian.net/rest/api/2/issue/KAN-1",
+                "unexpected path for base {base}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_build_url_percent_encodes_a_traversal_attempt_into_one_segment() {
+        let url = transport_at("https://test.atlassian.net")
+            .build_url(&["rest", "api", "2", "issue", "KAN-1/../../../admin"])
+            .unwrap();
+
+        assert_eq!(url.path(), "/rest/api/2/issue/KAN-1%2F..%2F..%2F..%2Fadmin");
+        assert_eq!(
+            url.path_segments().unwrap().count(),
+            5,
+            "a caller-supplied identifier introduced a path boundary"
+        );
+    }
+
+    #[test]
+    fn test_build_url_percent_encodes_query_and_fragment_delimiters() {
+        let url = transport_at("https://test.atlassian.net")
+            .build_url(&["rest", "api", "2", "issue", "KAN-1?expand=all#frag"])
+            .unwrap();
+
+        assert_eq!(url.path(), "/rest/api/2/issue/KAN-1%3Fexpand=all%23frag");
+        assert_eq!(url.query(), None);
+        assert_eq!(url.fragment(), None);
+    }
+
+    #[test]
+    fn test_build_url_rejects_segments_url_would_rewrite_rather_than_encode() {
+        let transport = transport_at("https://test.atlassian.net");
+
+        for segment in ["", ".", "..", "KAN\r\n-1", "KAN\t-1"] {
+            let err = transport
+                .build_url(&["rest", "api", "2", "issue", segment])
+                .unwrap_err();
+
+            assert!(
+                matches!(err, AtlassianError::Validation { .. }),
+                "segment {segment:?} produced {err:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_requests_reach_a_data_center_context_path() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/jira/rest/api/2/issue/TEST-123"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "10001",
+                "key": "TEST-123",
+                "self": format!("{}/jira/rest/api/2/issue/10001", server.uri()),
+                "fields": {
+                    "summary": "Context path issue",
+                    "issuetype": {
+                        "id": "10000",
+                        "name": "Task",
+                        "description": null,
+                        "iconUrl": null,
+                        "subtask": false
+                    },
+                    "status": {
+                        "id": "1",
+                        "name": "To Do",
+                        "description": null,
+                        "category": {
+                            "id": 2,
+                            "key": "new",
+                            "name": "To Do",
+                            "colorName": "blue-gray"
+                        }
+                    },
+                    "project": {
+                        "id": "10000",
+                        "key": "TEST",
+                        "name": "Test Project",
+                        "description": null,
+                        "projectTypeKey": "software",
+                        "avatarUrls": null
+                    },
+                    "labels": [],
+                    "components": []
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = create_mock_client_at(&format!("{}/jira", server.uri()));
+        let issue = client.get_issue("TEST-123").await.unwrap();
+
+        assert_eq!(issue.key, "TEST-123");
+    }
+
+    #[tokio::test]
+    async fn test_attachment_upload_reaches_a_data_center_context_path() {
+        let server = MockServer::start().await;
+        let attachment_path = std::env::temp_dir().join(format!(
+            "threatflux-atlassian-context-attachment-{}.txt",
+            std::process::id()
+        ));
+        fs::write(&attachment_path, b"context evidence").unwrap();
+
+        Mock::given(method("POST"))
+            .and(path("/jira/rest/api/2/issue/TEST-123/attachments"))
+            .and(header("x-atlassian-token", "no-check"))
+            .and(body_string_contains("context evidence"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([{ "id": "10001" }])))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = create_mock_client_at(&format!("{}/jira", server.uri()));
+        let response = client
+            .add_issue_attachment("TEST-123", &attachment_path)
+            .await
+            .unwrap();
+        fs::remove_file(&attachment_path).unwrap();
+
+        assert_eq!(response[0]["id"], "10001");
+    }
+
+    #[tokio::test]
+    async fn test_a_hostile_issue_key_cannot_escape_the_api_path() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let client = create_mock_client(&server);
+        let result = client.get_issue("TEST-123/../../../../admin").await;
+
+        assert!(matches!(result, Err(AtlassianError::NotFound { .. })));
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(
+            requests[0].url.path(),
+            "/rest/api/2/issue/TEST-123%2F..%2F..%2F..%2F..%2Fadmin"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_a_rejected_path_segment_sends_no_request() {
+        let server = MockServer::start().await;
+        // No mock is mounted: the segment must be rejected before any request is sent.
+        let client = create_mock_client(&server);
+
+        assert!(matches!(
+            client.get_issue("..").await,
+            Err(AtlassianError::Validation { .. })
+        ));
+        assert!(server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .is_empty());
+    }
+
+    /// A transport whose base URL was replaced after the configuration was
+    /// validated.
+    ///
+    /// `AtlassianConfig.base_url` is a public field and `AtlassianConfig::new`
+    /// does not validate, so a destination check anchored only to
+    /// `AtlassianClient::new` is a check on a value that can still change. This
+    /// is what the check on the joined URL is for.
+    fn transport_with_unvalidated_base(base_url: &str, policy: HostPolicy) -> Transport {
+        let config = AtlassianConfig::new(
+            base_url.to_string(),
+            "test@example.com".to_string(),
+            "test-token",
+        )
+        .unwrap()
+        .with_host_policy(policy);
+        Transport::new(config).unwrap()
+    }
+
+    #[test]
+    fn test_the_joined_url_is_checked_against_the_host_policy() {
+        for (base_url, policy) in [
+            ("http://attacker.example", HostPolicy::Loopback),
+            ("https://attacker.example", HostPolicy::AtlassianCloud),
+            ("http://127.0.0.1:9999", HostPolicy::AtlassianCloud),
+        ] {
+            let transport = transport_with_unvalidated_base(base_url, policy.clone());
+
+            let error = transport
+                .build_url(&["rest", "api", "2", "issue", "TEST-1"])
+                .unwrap_err();
+
+            assert!(
+                matches!(error, AtlassianError::Configuration { .. }),
+                "{base_url} under {policy} produced {error:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_a_refused_destination_sends_no_request_on_any_endpoint() {
+        // Every endpoint reaches the wire through the same builder, so one
+        // refusal covers all of them -- including the attachment upload, whose
+        // multipart body used to bypass the shared request path entirely.
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let attachment_path = std::env::temp_dir().join(format!(
+            "threatflux-atlassian-refused-attachment-{}.txt",
+            std::process::id()
+        ));
+        fs::write(&attachment_path, b"must not be uploaded").unwrap();
+
+        // Built against the mock, then re-pointed at a host the policy refuses.
+        let mut client = create_mock_client(&server);
+        client.transport.config.base_url = Url::parse("http://attacker.example/").unwrap();
+
+        let read = client.get_issue("TEST-123").await.unwrap_err();
+        let comment = client
+            .add_issue_comment("TEST-123", "body")
+            .await
+            .unwrap_err();
+        let attachment = client
+            .add_issue_attachment("TEST-123", &attachment_path)
+            .await
+            .unwrap_err();
+        fs::remove_file(&attachment_path).unwrap();
+
+        for error in [read, comment, attachment] {
+            assert!(
+                matches!(error, AtlassianError::Configuration { .. }),
+                "expected a configuration refusal, got {error:?}"
+            );
+        }
+        assert!(server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .is_empty());
+    }
+
+    #[test]
+    fn test_certificate_verification_is_only_relaxed_where_tls_happens() {
+        // `danger_accept_invalid_certs` is not readable back off a built
+        // `reqwest::Client`, so the warning the branch emits stands in for it.
+        const WARNING: &str = "TLS certificate verification is disabled";
+
+        let ((), cleartext_log) = logs::capture(|| {
+            let config = AtlassianConfig::new(
+                "http://127.0.0.1:9999".to_string(),
+                "test@example.com".to_string(),
+                "test-token",
+            )
+            .unwrap()
+            .with_host_policy(HostPolicy::Loopback)
+            .with_ssl_verification(false);
+            Transport::new(config).unwrap();
+        });
+        assert!(
+            !cleartext_log.contains(WARNING),
+            "an http base URL negotiates no TLS to relax; log was: {cleartext_log}"
+        );
+
+        let ((), tls_log) = logs::capture(|| {
+            let config = AtlassianConfig::new(
+                "https://jira.example.com".to_string(),
+                "test@example.com".to_string(),
+                "test-token",
+            )
+            .unwrap()
+            .with_ssl_verification(false);
+            Transport::new(config).unwrap();
+        });
+        assert!(tls_log.contains(WARNING), "log was: {tls_log}");
+    }
+
+    #[test]
+    fn test_transport_request_carries_its_idempotency_tag() {
+        let body = json!({ "body": "evidence" });
+        let params = HashMap::from([("startAt".to_string(), "0".to_string())]);
+
+        assert_eq!(
+            TransportRequest::new(Method::GET, &["rest"], Idempotency::Safe)
+                .query(&params)
+                .idempotency(),
+            Idempotency::Safe
+        );
+        assert_eq!(
+            TransportRequest::new(Method::POST, &["rest"], Idempotency::UnsafeWrite)
+                .json(&body)
+                .idempotency(),
+            Idempotency::UnsafeWrite
+        );
+        assert_eq!(
+            TransportRequest::new(Method::POST, &["rest"], Idempotency::UnsafeWrite)
+                .multipart(multipart::Form::new())
+                .idempotency(),
+            Idempotency::UnsafeWrite
+        );
+    }
+
+    #[test]
+    fn test_the_basic_header_carries_the_credential_itself() {
+        // `SecretString` renders `<redacted>` under `Display` as well as `Debug`,
+        // so the header builder interpolating it with `{}` would authenticate as
+        // `test@example.com:<redacted>` and every request would 401 -- which the
+        // mock tests, matching on no header at all, would not have caught.
+        let header = transport_at("https://test.atlassian.net")
+            .authorization_header()
+            .unwrap();
+        let encoded = header
+            .to_str()
+            .expect("a base64 header is ASCII")
+            .strip_prefix("Basic ")
+            .expect("the header is Basic auth")
+            .to_string();
+
+        assert_eq!(
+            String::from_utf8(BASE64_STANDARD.decode(encoded).unwrap()).unwrap(),
+            "test@example.com:test-token"
+        );
+    }
+
+    #[test]
+    fn test_the_basic_header_is_marked_sensitive() {
+        // reqwest and hyper print a `HeaderMap` in their own `Debug` output and
+        // in some error text; a sensitive value renders as `Sensitive` there.
+        let header = transport_at("https://test.atlassian.net")
+            .authorization_header()
+            .unwrap();
+
+        assert!(header.is_sensitive());
+
+        let rendered = format!("{header:?}");
+        assert_eq!(rendered, "Sensitive");
+        SecretScanner::new()
+            .with_basic_credentials("api token", "test@example.com", "test-token")
+            .assert_clean("the debug rendering of the Basic header", &rendered);
+    }
+
+    #[tokio::test]
+    async fn test_the_credential_reaches_the_wire_unredacted() {
+        let server = MockServer::start().await;
+        let expected = format!(
+            "Basic {}",
+            BASE64_STANDARD.encode("test@example.com:test-token")
+        );
+
+        Mock::given(method("GET"))
+            .and(path("/rest/api/2/myself"))
+            .and(header("authorization", expected.as_str()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "accountId": "account-123",
+                "displayName": "Allen Example",
+                "active": true
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = create_mock_client(&server);
+        let user = client.get_myself().await.unwrap();
+
+        assert_eq!(user.account_id.as_deref(), Some("account-123"));
+    }
+
+    /// Runs `body` on a current-thread runtime with every `tracing` event captured.
+    ///
+    /// The subscriber `logs::capture` installs is thread-local, so the future has
+    /// to be driven on the thread that installed it rather than on a worker pool.
+    fn capture_async<T>(body: impl Future<Output = T>) -> (T, String) {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a current-thread runtime should build");
+        logs::capture(|| runtime.block_on(body))
+    }
+
+    #[test]
+    fn test_a_search_does_not_log_the_query_it_sends() {
+        // A dedupe query carries the caller's label scheme, and a reconciliation
+        // query can carry summary text taken from an event body. Neither belongs
+        // in a log that a workflow publishes.
+        const TAIL: &str = "trailing-term-that-must-not-reach-a-log";
+        let jql = format!(r#"project = "TEST" AND labels = "prefix-{TAIL}""#);
+        assert!(jql.len() > PREVIEW_LIMIT, "the tail must be past the bound");
+
+        let (result, log) = capture_async(async {
+            let server = MockServer::start().await;
+            mount_empty_search(&server, &jql).await;
+            create_mock_client(&server).search_issues(&jql, 0, 50).await
+        });
+
+        assert_eq!(result.unwrap().total, 0);
+        assert!(!log.contains(TAIL), "log was: {log}");
+        assert!(!log.contains(&jql), "log was: {log}");
+        assert!(
+            log.contains(&format!("{}-character JQL query", jql.len())),
+            "log was: {log}"
+        );
+        assert!(log.contains("(truncated)"), "log was: {log}");
+    }
+
+    #[test]
+    fn test_creating_an_issue_does_not_log_the_whole_summary() {
+        // The summary is rendered from a template over event fields, so its tail
+        // is attacker-controlled text of unbounded length. The line is emitted
+        // before the request, so a rejected create still exercises it.
+        const TAIL: &str = "trailing-summary-text-that-must-not-reach-a-log";
+        let summary = format!("[Dependabot][High] a very long advisory title {TAIL}");
+
+        let (result, log) = capture_async(async {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/rest/api/2/issue"))
+                .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+                    "errorMessages": ["summary: Field cannot exceed 255 characters"]
+                })))
+                .mount(&server)
+                .await;
+
+            create_mock_client(&server)
+                .create_issue(CreateIssueRequest {
+                    fields: CreateIssueFields {
+                        project: ProjectReference::by_key("TEST"),
+                        summary: summary.clone(),
+                        issue_type: IssueTypeReference::by_name("Task"),
+                        description: None,
+                        assignee: None,
+                        priority: None,
+                        labels: None,
+                        components: None,
+                        parent: None,
+                        custom_fields: HashMap::new(),
+                    },
+                })
+                .await
+        });
+
+        assert!(result.is_err());
+        // The property this test exists for: whatever reached the log, the
+        // attacker-controlled tail is not in it. It holds however much of the
+        // create path ran, including not at all.
+        assert!(!log.contains(TAIL), "log was: {log}");
+
+        // What the line itself renders is asserted on `preview` directly rather
+        // than by matching the emitted text. Asserting a line is *present* tests
+        // `tracing`'s global emission state, which every other test in this
+        // binary shares and can settle before this one runs; that made this
+        // assertion fail in CI while passing everywhere it was reproduced.
+        let rendered = preview(&summary);
+        assert!(!rendered.contains(TAIL), "preview was: {rendered}");
+        assert!(rendered.contains("(truncated)"), "preview was: {rendered}");
+        assert!(
+            rendered.len() < summary.len(),
+            "preview was: {rendered}, summary was {} bytes",
+            summary.len()
+        );
+    }
+
+    #[test]
+    fn test_updating_a_custom_field_does_not_log_the_value() {
+        // The value is the one argument here that a caller can point at a
+        // credential -- an integration writing a rotated token into a field.
+        const VALUE: &str = "s3cr3t-value-written-into-a-jira-field-and-never-into-a-log";
+
+        let (result, log) = capture_async(async {
+            let server = MockServer::start().await;
+            Mock::given(method("PUT"))
+                .and(path("/rest/api/2/issue/TEST-123"))
+                .respond_with(ResponseTemplate::new(204))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            create_mock_client(&server)
+                .update_custom_field("TEST-123", "customfield_11024", VALUE)
+                .await
+        });
+
+        result.unwrap();
+        assert!(!log.contains(VALUE), "log was: {log}");
+        assert!(
+            log.contains("Updating custom field customfield_11024 for TEST-123"),
+            "log was: {log}"
+        );
+    }
+
+    #[test]
+    fn test_the_logged_request_url_carries_no_query_string() {
+        // `Transport::send` logs the URL `build_url` returned, and query
+        // parameters are attached to the reqwest builder afterwards -- so the
+        // JQL, the user-search term and the pagination cursor are not in it.
+        // Asserted rather than assumed, because the log line reads as though it
+        // renders the URL that was sent.
+        let params = HashMap::from([("jql".to_string(), r#"labels = "secret""#.to_string())]);
+        let request = TransportRequest::new(
+            Method::GET,
+            &["rest", "api", "2", "search"],
+            Idempotency::Safe,
+        )
+        .query(&params);
+        let url = transport_at("https://test.atlassian.net")
+            .build_url(request.segments)
+            .unwrap();
+
+        assert_eq!(url.query(), None);
+        assert_eq!(
+            url.as_str(),
+            "https://test.atlassian.net/rest/api/2/search",
+            "the logged URL is built before query parameters are attached"
+        );
+    }
+
+    #[test]
+    fn test_a_preview_is_bounded_and_escaped() {
+        // Bounded, so an unbounded value cannot be copied wholesale into a log
+        // sink; escaped, so a newline inside it cannot end the log line and forge
+        // the next one.
+        let long = "s".repeat(4096);
+        let rendered = preview(&long);
+
+        assert!(rendered.len() < 200, "preview: {rendered}");
+        assert!(!rendered.contains(&long));
+        assert!(rendered.contains("(truncated)"));
+
+        assert_eq!(preview("high"), r#""high""#);
+        assert_eq!(
+            preview("one\ntwo"),
+            r#""one\ntwo""#,
+            "a newline must not survive as a line break"
+        );
+    }
+
+    #[test]
+    fn test_the_diagnostics_policy_defaults_to_metadata_only_and_survives_a_clone() {
+        let client = AtlassianClient::new(create_test_config()).unwrap();
+        assert_eq!(client.diagnostics(), DiagnosticsPolicy::MetadataOnly);
+
+        let widened = client.with_diagnostics(DiagnosticsPolicy::IncludeBody);
+        let cloned = widened.clone();
+        assert_eq!(widened.diagnostics(), DiagnosticsPolicy::IncludeBody);
+        assert_eq!(
+            cloned.diagnostics(),
+            DiagnosticsPolicy::IncludeBody,
+            "an `Arc`-shared client must not silently narrow the policy"
+        );
+    }
+
+    #[test]
+    fn test_a_failing_response_keeps_its_body_out_of_the_error_and_the_log() {
+        // A Jira error document echoes the request that produced it, and the
+        // workflow log this process writes into is world-readable on a public
+        // repository.
+        const MARKER: &str = "jira-response-text-that-must-not-escape";
+
+        let (result, log) = capture_async(async {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/rest/api/2/issue/TEST-123"))
+                .respond_with(ResponseTemplate::new(500).set_body_json(json!({
+                    "errorMessages": [MARKER],
+                })))
+                .mount(&server)
+                .await;
+
+            create_mock_client(&server).get_issue("TEST-123").await
+        });
+
+        let error = result.unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "Jira API error: Jira API request failed with HTTP 500"
+        );
+        assert!(!log.contains(MARKER), "log was: {log}");
+        assert_eq!(
+            error.diagnostics().map(|diagnostics| diagnostics.policy),
+            Some(DiagnosticsPolicy::MetadataOnly)
+        );
+        assert!(error
+            .diagnostics()
+            .is_some_and(|diagnostics| diagnostics.body.is_none()));
+    }
+
+    #[test]
+    fn test_a_client_can_opt_into_the_jira_error_fields() {
+        const DETAIL: &str = "Field 'summary' is required";
+
+        let (result, log) = capture_async(async {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/rest/api/2/issue/TEST-123"))
+                .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+                    "errorMessages": [DETAIL],
+                })))
+                .mount(&server)
+                .await;
+
+            create_mock_client(&server)
+                .with_diagnostics(DiagnosticsPolicy::JiraErrorFields)
+                .get_issue("TEST-123")
+                .await
+        });
+
+        let error = result.unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            format!("Jira API error: Jira API request failed with HTTP 400: {DETAIL}")
+        );
+        assert!(
+            !log.contains(DETAIL),
+            "the opt-in widens the error, not the log: {log}"
+        );
+    }
+
+    #[test]
+    fn test_a_preview_never_splits_a_character() {
+        // The bound counts characters rather than bytes; a byte slice at 48 would
+        // panic partway through a 4-byte emoji.
+        let emoji = "\u{1f512}".repeat(PREVIEW_LIMIT * 2);
+        let rendered = preview(&emoji);
+
+        assert!(rendered.contains("(truncated)"));
+        assert_eq!(
+            rendered.matches('\u{1f512}').count(),
+            PREVIEW_LIMIT,
+            "preview: {rendered}"
+        );
     }
 }

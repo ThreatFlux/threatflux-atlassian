@@ -12,18 +12,27 @@ readme = "README.md"
 keywords = ["atlassian", "jira", "sdk", "rest", "automation"]
 categories = ["api-bindings", "web-programming"]
 
+# The order of this table is a contract: `scripts/check_docs.py` compares it
+# positionally against the FEATURES table in README.md, so a feature added here
+# has to be appended in the same position there.
 [features]
 default = ["full"]
-full = ["direct", "remote"]
+full = ["direct", "remote", "encrypted-env"]
 direct = []
 remote = []
 ssl-verification = []
+# `dep:` rather than a bare name, so enabling `encrypted-env` is the only way to
+# pull fluxencrypt in: a bare `"fluxencrypt"` would also mint an implicit
+# `fluxencrypt` feature that reaches the same dependency without the gate.
+encrypted-env = ["dep:fluxencrypt", "dep:dotenvy"]
 
 [dependencies]
 base64 = { workspace = true }
 chrono = { workspace = true }
-dotenvy = { workspace = true }
-fluxencrypt = { workspace = true }
+dotenvy = { workspace = true, optional = true }
+# fluxencrypt is the sole path by which rsa 0.9.x (RUSTSEC-2023-0071, no patched
+# version) enters this crate's graph, which is why it is behind a feature.
+fluxencrypt = { workspace = true, optional = true }
 rand = { workspace = true }
 reqwest = { workspace = true }
 schemars = { workspace = true }
@@ -36,11 +45,13 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 url = { workspace = true, features = ["serde"] }
 uuid = { workspace = true }
+zeroize = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tokio-test = { workspace = true }
 serial_test = { workspace = true }
+threatflux-atlassian-testkit = { path = "../threatflux-atlassian-testkit" }
 tracing-subscriber = { workspace = true }
 wiremock = { workspace = true }
 

@@ -5,9 +5,13 @@
 //! associated client targets an endpoint Atlassian stopped supporting after June 30,
 //! 2026 and is not compatible with the current Rovo MCP service.
 
-use crate::error::{AtlassianError, Result};
+use crate::error::{
+    map_error_response, AtlassianError, DiagnosticsPolicy, FailureContext, FailureShape, Result,
+};
+use crate::secret::{zeroize_string, SecretString};
 use base64::Engine;
-use serde::{Deserialize, Serialize};
+use reqwest::header::HeaderValue;
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -15,7 +19,12 @@ use tracing::{debug, info, warn};
 use url::Url;
 
 /// OAuth configuration used by the legacy Remote MCP flow.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Not `Serialize`: `code_verifier` is the PKCE secret that binds an
+/// authorization code to this client, so a serialized configuration is a
+/// serialized credential. `Deserialize` is kept, and a deserialized
+/// configuration simply carries no verifier until one is generated.
+#[derive(Debug, Clone, Deserialize)]
 pub struct OAuthConfig {
     /// Client ID for OAuth application
     pub client_id: String,
@@ -28,22 +37,26 @@ pub struct OAuthConfig {
     /// OAuth scopes requested
     pub scopes: Vec<String>,
     /// PKCE code verifier for enhanced security
-    pub code_verifier: Option<String>,
+    pub code_verifier: Option<SecretString>,
     /// State parameter for CSRF protection
     pub state: Option<String>,
 }
 
 /// OAuth access token information
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Not `Serialize`: the access and refresh tokens are bearer credentials, and a
+/// token that can be written to a cache file or a log line is a token that will
+/// be. `Deserialize` is kept because a stored token has to be readable.
+#[derive(Debug, Clone, Deserialize)]
 pub struct AccessToken {
     /// The access token string
-    pub access_token: String,
+    pub access_token: SecretString,
     /// Token type (usually "Bearer")
     pub token_type: String,
     /// Token expiration timestamp
     pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
     /// Refresh token for renewals
-    pub refresh_token: Option<String>,
+    pub refresh_token: Option<SecretString>,
     /// Granted scopes
     pub scope: Option<String>,
 }
@@ -52,7 +65,7 @@ pub struct AccessToken {
 #[derive(Debug, Deserialize)]
 pub struct AuthorizationResponse {
     /// Authorization code from OAuth flow
-    pub code: String,
+    pub code: SecretString,
     /// State parameter for validation
     pub state: Option<String>,
 }
@@ -61,13 +74,13 @@ pub struct AuthorizationResponse {
 #[derive(Debug, Deserialize)]
 pub struct TokenResponse {
     /// Access token
-    pub access_token: String,
+    pub access_token: SecretString,
     /// Token type
     pub token_type: String,
     /// Expires in seconds
     pub expires_in: Option<u64>,
     /// Refresh token
-    pub refresh_token: Option<String>,
+    pub refresh_token: Option<SecretString>,
     /// Granted scope
     pub scope: Option<String>,
 }
@@ -81,6 +94,8 @@ pub struct AuthManager {
     client: reqwest::Client,
     /// Current access token
     token: Arc<RwLock<Option<AccessToken>>>,
+    /// How much of a failing token-endpoint response may reach an error
+    diagnostics: DiagnosticsPolicy,
 }
 
 impl AuthManager {
@@ -102,7 +117,23 @@ impl AuthManager {
             config,
             client,
             token,
+            diagnostics: DiagnosticsPolicy::default(),
         }
+    }
+
+    /// Choose how much of a failing token-endpoint response may reach an error.
+    ///
+    /// A token endpoint's error body echoes the request that produced it, which on
+    /// this path is a PKCE verifier and an authorization code, so the default is
+    /// [`DiagnosticsPolicy::MetadataOnly`] and the body is not read at all.
+    ///
+    /// The setting is per-manager. [`AuthorizationProxy`] and [`McpAuthHandler`]
+    /// build their own managers for the retired Remote MCP flow and leave them at
+    /// the default.
+    #[must_use]
+    pub const fn with_diagnostics(mut self, policy: DiagnosticsPolicy) -> Self {
+        self.diagnostics = policy;
+        self
     }
 
     /// Create the hard-coded OAuth configuration used by the legacy Remote MCP flow.
@@ -136,13 +167,44 @@ impl AuthManager {
         })
     }
 
+    /// Refuses a token endpoint that would carry the credential in cleartext.
+    ///
+    /// The requests guarded by this send the authorization code, the PKCE
+    /// verifier, and the refresh token. `OAuthConfig` has public fields and
+    /// derives `Deserialize`, so a checked constructor is not enough on its own
+    /// -- this runs on the value actually about to be posted to, which is the
+    /// same reason [`HostPolicy::check_destination`] re-runs per request.
+    ///
+    /// There is no loopback escape here, unlike the Jira transport: nothing in
+    /// this crate posts to a mock token endpoint, so adding one would only widen
+    /// the surface.
+    ///
+    /// [`HostPolicy::check_destination`]: crate::config::HostPolicy::check_destination
+    fn check_token_endpoint(endpoint: &Url) -> Result<()> {
+        if !endpoint.username().is_empty() || endpoint.password().is_some() {
+            return Err(AtlassianError::config(
+                "OAuth token endpoint must not carry credentials in its authority",
+            ));
+        }
+
+        if endpoint.scheme() != "https" {
+            return Err(AtlassianError::config(format!(
+                "OAuth token endpoint must be https, but {} was addressed over '{}'",
+                endpoint.host_str().unwrap_or("a host-less URL"),
+                endpoint.scheme()
+            )));
+        }
+
+        Ok(())
+    }
+
     /// Generate authorization URL with PKCE
     pub fn generate_authorization_url(&mut self) -> Result<String> {
         info!("Generating OAuth 2.1 authorization URL with PKCE");
 
         // Generate PKCE code verifier and challenge
         let code_verifier = Self::generate_code_verifier();
-        let code_challenge = Self::generate_code_challenge(&code_verifier);
+        let code_challenge = Self::generate_code_challenge(code_verifier.expose_secret());
 
         // Generate state parameter for CSRF protection
         let state = uuid::Uuid::new_v4().to_string();
@@ -193,10 +255,12 @@ impl AuthManager {
         // Prepare token request
         let mut params = HashMap::new();
         params.insert("grant_type", "authorization_code");
-        params.insert("code", &auth_response.code);
+        params.insert("code", auth_response.code.expose_secret());
         params.insert("redirect_uri", self.config.redirect_uri.as_str());
         params.insert("client_id", &self.config.client_id);
-        params.insert("code_verifier", code_verifier);
+        params.insert("code_verifier", code_verifier.expose_secret());
+
+        Self::check_token_endpoint(&self.config.token_endpoint)?;
 
         let response = self
             .client
@@ -207,10 +271,11 @@ impl AuthManager {
             .await?;
 
         if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(AtlassianError::auth(format!(
-                "Token exchange failed: {error_text}"
-            )));
+            return Err(map_error_response(
+                response,
+                FailureContext::new(FailureShape::OAuthToken, "Token exchange", self.diagnostics),
+            )
+            .await);
         }
 
         let token_response: TokenResponse = response.json().await?;
@@ -268,8 +333,10 @@ impl AuthManager {
 
         let mut params = HashMap::new();
         params.insert("grant_type", "refresh_token");
-        params.insert("refresh_token", &refresh_token);
+        params.insert("refresh_token", refresh_token.expose_secret());
         params.insert("client_id", &self.config.client_id);
+
+        Self::check_token_endpoint(&self.config.token_endpoint)?;
 
         let response = self
             .client
@@ -280,10 +347,11 @@ impl AuthManager {
             .await?;
 
         if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(AtlassianError::auth(format!(
-                "Token refresh failed: {error_text}"
-            )));
+            return Err(map_error_response(
+                response,
+                FailureContext::new(FailureShape::OAuthToken, "Token refresh", self.diagnostics),
+            )
+            .await);
         }
 
         let token_response: TokenResponse = response.json().await?;
@@ -312,17 +380,18 @@ impl AuthManager {
     }
 
     /// Generate PKCE code verifier
-    fn generate_code_verifier() -> String {
+    fn generate_code_verifier() -> SecretString {
         use rand::RngExt;
         const CHARSET: &[u8] =
             b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
         let mut rng = rand::rng();
-        (0..128)
+        let verifier: String = (0..128)
             .map(|_| {
                 let idx = rng.random_range(0..CHARSET.len());
                 CHARSET[idx] as char
             })
-            .collect()
+            .collect();
+        SecretString::from(verifier)
     }
 
     /// Generate PKCE code challenge from verifier
@@ -472,14 +541,17 @@ impl McpAuthHandler {
     /// Process callback values received and supplied by the caller.
     pub async fn process_callback(
         &mut self,
-        code: String,
+        code: impl Into<SecretString>,
         state: Option<String>,
     ) -> Result<AccessToken> {
         if !self.auth_flow_active {
             return Err(AtlassianError::auth("No active authorization flow"));
         }
 
-        let auth_response = AuthorizationResponse { code, state };
+        let auth_response = AuthorizationResponse {
+            code: code.into(),
+            state,
+        };
         let token = self.proxy.handle_oauth_callback(auth_response).await?;
 
         self.auth_flow_active = false;
@@ -489,12 +561,29 @@ impl McpAuthHandler {
     }
 
     /// Get authorization header value for authenticated requests
-    pub async fn get_auth_header(&self) -> Option<String> {
-        if let Some(token) = self.proxy.get_access_token().await {
-            Some(format!("{} {}", token.token_type, token.access_token))
-        } else {
-            None
-        }
+    ///
+    /// Returns a header already marked sensitive, so reqwest and hyper render it
+    /// as `Sensitive` in their own `Debug` output and error text rather than
+    /// printing the bearer token. The plaintext never leaves this function: the
+    /// rendered value is zeroized once the header owns a copy.
+    ///
+    /// Returns `None` when there is no token, and when the token cannot be
+    /// rendered into a header value at all.
+    pub async fn get_auth_header(&self) -> Option<HeaderValue> {
+        let token = self.proxy.get_access_token().await?;
+
+        let mut rendered = format!(
+            "{} {}",
+            token.token_type,
+            token.access_token.expose_secret()
+        );
+        let header = HeaderValue::from_str(&rendered).ok().map(|mut header| {
+            header.set_sensitive(true);
+            header
+        });
+        zeroize_string(&mut rendered);
+
+        header
     }
 
     /// Check if needs re-authorization
@@ -506,6 +595,77 @@ impl McpAuthHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_token_endpoint_body_is_withheld_unless_the_caller_asks_for_it() {
+        // A token endpoint's error body echoes the request, and on this path the
+        // request carries the PKCE verifier and the authorization code.
+        let config = AuthManager::create_atlassian_oauth_config(
+            "test-client-id".to_string(),
+            "http://localhost:8080/callback",
+        )
+        .unwrap();
+        let manager = AuthManager::new(config);
+
+        assert_eq!(manager.diagnostics, DiagnosticsPolicy::MetadataOnly);
+        assert_eq!(
+            manager
+                .with_diagnostics(DiagnosticsPolicy::IncludeBody)
+                .diagnostics,
+            DiagnosticsPolicy::IncludeBody
+        );
+    }
+
+    #[test]
+    fn a_cleartext_token_endpoint_is_refused_before_the_verifier_is_sent() {
+        // This request carries the authorization code and the PKCE verifier, so
+        // the refusal has to happen before the POST, not at construction: the
+        // fields are public and the type deserializes.
+        for endpoint in [
+            "http://auth.atlassian.com/oauth/token",
+            "http://127.0.0.1:8080/oauth/token",
+        ] {
+            let error = AuthManager::check_token_endpoint(&Url::parse(endpoint).unwrap())
+                .expect_err("a cleartext token endpoint must be refused");
+            let rendered = error.to_string();
+            assert!(rendered.contains("must be https"), "error was: {rendered}");
+        }
+
+        AuthManager::check_token_endpoint(
+            &Url::parse("https://auth.atlassian.com/oauth/token").unwrap(),
+        )
+        .expect("the real token endpoint must still be accepted");
+    }
+
+    #[test]
+    fn a_token_endpoint_carrying_credentials_is_refused() {
+        let error = AuthManager::check_token_endpoint(
+            &Url::parse("https://user:p4ssw0rd-CANARY@auth.atlassian.com/oauth/token").unwrap(),
+        )
+        .expect_err("userinfo in the token endpoint must be refused");
+
+        let rendered = error.to_string();
+        assert!(
+            !rendered.contains("p4ssw0rd-CANARY"),
+            "error echoed the credential: {rendered}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_mcp_bearer_header_is_marked_sensitive() {
+        // reqwest and hyper print a HeaderMap in their own Debug output, so an
+        // unmarked bearer header reaches those channels in full. The Jira
+        // transport marks its Basic header the same way.
+        let mut header = HeaderValue::from_str("Bearer token-CANARY").unwrap();
+        header.set_sensitive(true);
+
+        assert!(header.is_sensitive());
+        let rendered = format!("{header:?}");
+        assert!(
+            !rendered.contains("token-CANARY"),
+            "a sensitive header still rendered its value: {rendered}"
+        );
+    }
 
     #[test]
     fn test_oauth_config_creation() {
@@ -524,20 +684,113 @@ mod tests {
     }
 
     #[test]
-    fn test_access_token_serialization() {
-        let token = AccessToken {
-            access_token: "test-token".to_string(),
-            token_type: "Bearer".to_string(),
-            expires_at: Some(chrono::Utc::now() + chrono::Duration::hours(1)),
-            refresh_token: Some("refresh-token".to_string()),
-            scope: Some("read:jira-work".to_string()),
-        };
+    fn test_access_token_deserialization() {
+        // This test used to round-trip an `AccessToken` through
+        // `serde_json::to_string`, which made "a bearer token can be serialized"
+        // a de-facto contract of this crate. The contract is withdrawn: the read
+        // direction is what a token endpoint response and a stored token need,
+        // and it is asserted here; the write direction no longer compiles, which
+        // `SecretString`'s own `compile_fail` doctest pins.
+        let expires_at = chrono::Utc::now() + chrono::Duration::hours(1);
+        let deserialized: AccessToken = serde_json::from_value(serde_json::json!({
+            "access_token": "test-token",
+            "token_type": "Bearer",
+            "expires_at": expires_at,
+            "refresh_token": "refresh-token",
+            "scope": "read:jira-work",
+        }))
+        .unwrap();
 
-        let serialized = serde_json::to_string(&token);
-        assert!(serialized.is_ok());
+        assert_eq!(deserialized.access_token.expose_secret(), "test-token");
+        assert_eq!(deserialized.token_type, "Bearer");
+        assert_eq!(
+            deserialized.refresh_token.as_ref().unwrap().expose_secret(),
+            "refresh-token"
+        );
+        assert_eq!(deserialized.scope.as_deref(), Some("read:jira-work"));
+        assert_eq!(deserialized.expires_at, Some(expires_at));
+    }
 
-        let deserialized: AccessToken = serde_json::from_str(&serialized.unwrap()).unwrap();
-        assert_eq!(deserialized.access_token, token.access_token);
+    #[test]
+    fn test_access_token_debug_does_not_print_the_credentials() {
+        let token: AccessToken = serde_json::from_value(serde_json::json!({
+            "access_token": "at-s3cr3t",
+            "token_type": "Bearer",
+            "refresh_token": "rt-s3cr3t",
+        }))
+        .unwrap();
+
+        let rendered = format!("{token:?}");
+
+        assert!(!rendered.contains("at-s3cr3t"), "rendered: {rendered}");
+        assert!(!rendered.contains("rt-s3cr3t"), "rendered: {rendered}");
+        assert!(rendered.contains("Bearer"), "rendered: {rendered}");
+    }
+
+    #[test]
+    fn test_an_oauth_config_debug_does_not_print_the_code_verifier() {
+        // The verifier is what binds an authorization code to this client, so a
+        // config dumped into a log is a config whose PKCE protection is gone.
+        let mut manager = AuthManager::new(
+            AuthManager::create_atlassian_oauth_config(
+                "test-client-id".to_string(),
+                "http://localhost:8080/callback",
+            )
+            .unwrap(),
+        );
+        manager.generate_authorization_url().unwrap();
+
+        let verifier = manager
+            .config
+            .code_verifier
+            .as_ref()
+            .expect("the flow stores a verifier")
+            .expose_secret()
+            .to_string();
+        let rendered = format!("{:?}", manager.config);
+
+        assert!(!rendered.contains(&verifier), "rendered: {rendered}");
+        assert!(rendered.contains("test-client-id"), "rendered: {rendered}");
+    }
+
+    #[test]
+    fn test_an_authorization_code_is_not_printed_either() {
+        let response: AuthorizationResponse = serde_json::from_value(serde_json::json!({
+            "code": "authcode-s3cr3t",
+            "state": "csrf-state",
+        }))
+        .unwrap();
+
+        let rendered = format!("{response:?}");
+
+        assert_eq!(response.code.expose_secret(), "authcode-s3cr3t");
+        assert!(
+            !rendered.contains("authcode-s3cr3t"),
+            "rendered: {rendered}"
+        );
+        assert!(rendered.contains("csrf-state"), "rendered: {rendered}");
+    }
+
+    #[test]
+    fn test_a_token_endpoint_response_parses_into_the_secret_type() {
+        let response: TokenResponse = serde_json::from_value(serde_json::json!({
+            "access_token": "at-1",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+            "refresh_token": "rt-1",
+            "scope": "read:jira-work",
+        }))
+        .unwrap();
+
+        assert_eq!(response.access_token.expose_secret(), "at-1");
+        assert_eq!(
+            response.refresh_token.as_ref().unwrap().expose_secret(),
+            "rt-1"
+        );
+        assert!(
+            !format!("{response:?}").contains("at-1"),
+            "the response prints its own token"
+        );
     }
 
     #[test]
@@ -551,9 +804,14 @@ mod tests {
         );
 
         let code_verifier = AuthManager::generate_code_verifier();
-        assert!(code_verifier.len() >= 43 && code_verifier.len() <= 128);
+        let exposed = code_verifier.expose_secret();
+        assert!(exposed.len() >= 43 && exposed.len() <= 128);
+        assert!(
+            !format!("{code_verifier:?}").contains(exposed),
+            "the verifier prints itself"
+        );
 
-        let code_challenge = AuthManager::generate_code_challenge(&code_verifier);
+        let code_challenge = AuthManager::generate_code_challenge(exposed);
         assert_eq!(code_challenge.len(), 43); // Base64 URL-safe encoded SHA256 hash
     }
 }

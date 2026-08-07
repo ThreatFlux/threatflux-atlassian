@@ -16,7 +16,10 @@ name = "tflux-atlassian"
 path = "src/main.rs"
 
 [dependencies]
-threatflux-atlassian-sdk = { workspace = true }
+# The CLI encrypts and decrypts credentials itself (`fluxencrypt` below) and
+# documents `JIRA_API_TOKEN_ENCRYPTED`/`ENV_FILE_ENCRYPTED`, so it takes the
+# SDK's `full` set explicitly. The workspace entry is `default-features = false`.
+threatflux-atlassian-sdk = { workspace = true, features = ["full"] }
 anyhow.workspace = true
 base64.workspace = true
 clap.workspace = true

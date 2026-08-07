@@ -96,15 +96,26 @@ pub fn render_template(
     Ok(rendered)
 }
 
+/// Every event field a config may name, in a template or in `dedupe.fields`.
+///
+/// `resolve_event_value` must answer for each entry: a path listed here and not
+/// resolved there loads as a valid config and fails the run instead.
+pub(crate) const SUPPORTED_EVENT_FIELD_PATHS: &[&str] = &[
+    "issue.id",
+    "issue.number",
+    "issue.node_id",
+    "issue.state",
+    "issue.title",
+    "issue.body",
+    "issue.html_url",
+    "issue.user.login",
+    "repository.id",
+    "repository.node_id",
+    "repository.full_name",
+];
+
 pub(crate) fn is_supported_event_field_path(path: &str) -> bool {
-    matches!(
-        path,
-        "issue.title"
-            | "issue.body"
-            | "issue.html_url"
-            | "issue.user.login"
-            | "repository.full_name"
-    )
+    SUPPORTED_EVENT_FIELD_PATHS.contains(&path)
 }
 
 fn is_supported_template_key(key: &str) -> bool {
@@ -127,10 +138,16 @@ pub(crate) fn validate_template(label: &str, template: &str) -> Result<()> {
 
 pub(crate) fn resolve_event_value(path: &str, event: &GitHubIssueEvent) -> Result<String> {
     match path {
+        "issue.id" => Ok(event.issue.id.to_string()),
+        "issue.number" => Ok(event.issue.number.to_string()),
+        "issue.node_id" => Ok(event.issue.node_id.clone()),
+        "issue.state" => Ok(event.issue.state.clone()),
         "issue.title" => Ok(event.issue.title.clone()),
         "issue.body" => Ok(event.issue.body.clone().unwrap_or_default()),
         "issue.html_url" => Ok(event.issue.html_url.clone()),
         "issue.user.login" => Ok(event.issue.user.login.clone()),
+        "repository.id" => Ok(event.repository.id.to_string()),
+        "repository.node_id" => Ok(event.repository.node_id.clone()),
         "repository.full_name" => Ok(event.repository.full_name.clone()),
         _ => anyhow::bail!("Unsupported event field path: {path}"),
     }
@@ -179,10 +196,43 @@ fn title_case(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{evaluate_rule, render_template, title_case, validate_template};
+    use super::{
+        evaluate_rule, render_template, resolve_event_value, title_case, validate_template,
+        SUPPORTED_EVENT_FIELD_PATHS,
+    };
     use crate::config::load_config_from_str;
-    use crate::github::load_issue_event_from_str;
+    use crate::github::{load_issue_event_from_str, GitHubIssueEvent};
     use threatflux_atlassian_testkit::fixtures;
+
+    /// A config that dedupes on the repository and issue identity instead of on
+    /// content, which is what the widened field allowlist makes expressible.
+    const IDENTITY_DEDUPE_CONFIG: &str = r"
+version: 1
+rules:
+  - id: identity-dedupe
+    when:
+      event: issues
+      action: opened
+    extract:
+      severity:
+        from: issue.body
+        regex: '(?mi)^severity:\s*(high|critical)\b'
+    jira:
+      project_key: KAN
+      issue_type: Bug
+      priority_by_severity:
+        high: High
+      summary: '{{ repository.id }}-{{ issue.number }}'
+      description: '{{ issue.node_id }} {{ issue.state }} {{ repository.node_id }}'
+      dedupe:
+        strategy: sha256
+        fields: [repository.id, issue.number]
+";
+
+    fn parse_event(name: &str) -> GitHubIssueEvent {
+        load_issue_event_from_str("issues", fixtures::github_event(name))
+            .expect("event should parse")
+    }
 
     #[test]
     fn evaluate_rule_extracts_high_severity_and_dedupe_label() {
@@ -418,5 +468,107 @@ rules:
     #[test]
     fn title_case_returns_empty_string_for_empty_input() {
         assert!(title_case("").is_empty());
+    }
+
+    #[test]
+    fn every_supported_field_path_resolves_and_validates() {
+        let event = parse_event("issues-opened-dependabot");
+
+        for path in SUPPORTED_EVENT_FIELD_PATHS {
+            let value = resolve_event_value(path, &event).unwrap_or_else(|error| {
+                panic!("allowlisted path '{path}' did not resolve: {error}")
+            });
+            assert!(!value.is_empty(), "'{path}' resolved to nothing");
+
+            validate_template("test template", &format!("{{{{ {path} }}}}")).unwrap_or_else(
+                |error| panic!("allowlisted path '{path}' is not a template key: {error}"),
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_event_value_reads_the_identity_fields() {
+        let event = parse_event("issues-opened-dependabot");
+
+        for (path, expected) in [
+            ("issue.id", "2147000123"),
+            ("issue.number", "123"),
+            ("issue.node_id", "I_kwDOI7Vczs5xAAB7"),
+            ("issue.state", "open"),
+            ("repository.id", "598178766"),
+            ("repository.node_id", "R_kgDOI7Vczg"),
+        ] {
+            assert_eq!(
+                resolve_event_value(path, &event).expect("identity path should resolve"),
+                expected,
+                "path '{path}'"
+            );
+        }
+    }
+
+    #[test]
+    fn render_template_substitutes_the_identity_fields() {
+        let config = load_config_from_str(IDENTITY_DEDUPE_CONFIG).expect("config should load");
+        let event = parse_event("issues-opened-dependabot");
+        let matched = evaluate_rule(&config.rules[0], &event)
+            .expect("rule evaluation should succeed")
+            .expect("rule should match");
+
+        assert_eq!(
+            render_template(&config.rules[0].jira.summary, &event, &matched)
+                .expect("summary should render"),
+            "598178766-123"
+        );
+        assert_eq!(
+            render_template(&config.rules[0].jira.description, &event, &matched)
+                .expect("description should render"),
+            "I_kwDOI7Vczs5xAAB7 open R_kgDOI7Vczg"
+        );
+    }
+
+    #[test]
+    fn a_config_can_dedupe_on_the_issue_identity_instead_of_on_content() {
+        let config = load_config_from_str(IDENTITY_DEDUPE_CONFIG).expect("config should load");
+        let rule = &config.rules[0];
+
+        let one = parse_event("issues-opened-dependabot");
+        let two = parse_event("issues-opened-dependabot-high");
+        assert_eq!(one.repository.id, two.repository.id);
+        assert_ne!(one.issue.number, two.issue.number);
+
+        let first = evaluate_rule(rule, &one)
+            .expect("rule evaluation should succeed")
+            .expect("rule should match");
+        let second = evaluate_rule(rule, &two)
+            .expect("rule evaluation should succeed")
+            .expect("rule should match");
+
+        // The content hash the shipped configs use cannot tell these two apart;
+        // an identity-keyed one has to, which is the whole point of the fields.
+        assert_ne!(
+            first.dedupe_label, second.dedupe_label,
+            "two issues in one repository must not share a dedupe label"
+        );
+    }
+
+    #[test]
+    fn a_retitle_does_not_move_an_identity_keyed_dedupe_label() {
+        let config = load_config_from_str(IDENTITY_DEDUPE_CONFIG).expect("config should load");
+        let rule = &config.rules[0];
+
+        let before = evaluate_rule(rule, &parse_event("issues-opened-dependabot"))
+            .expect("rule evaluation should succeed")
+            .expect("rule should match");
+
+        let mut payload = fixtures::github_event_json("issues-opened-dependabot");
+        payload["issue"]["title"] =
+            serde_json::Value::String("Bump openssl from 1.0 to 1.1.1".to_string());
+        let retitled = load_issue_event_from_str("issues", &payload.to_string())
+            .expect("the retitled delivery should parse");
+        let after = evaluate_rule(rule, &retitled)
+            .expect("rule evaluation should succeed")
+            .expect("rule should match");
+
+        assert_eq!(before.dedupe_label, after.dedupe_label);
     }
 }

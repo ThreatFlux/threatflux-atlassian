@@ -84,10 +84,19 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 # How to handle yanked crates
 yanked = "warn"
 
-# Ignore specific advisories (add with justification)
+# Ignore specific advisories (add with justification).
+#
+# This list is deliberately duplicated in `.cargo/audit.toml`, because
+# cargo-deny does not read that file and cargo-audit does not read this one.
+# `scripts/check_advisory_ignores.py` fails the build when the two disagree, so
+# an entry added or removed here has to be added or removed there in the same
+# commit.
 ignore = [
     # fluxencrypt currently depends on rsa 0.9.x and RustSec has not published
-    # a fixed upgrade path for RUSTSEC-2023-0071 yet.
+    # a fixed upgrade path for RUSTSEC-2023-0071 yet. The SDK's `encrypted-env`
+    # feature takes that path out of the Action's graph and out of any consumer
+    # on `default-features = false`, but `full` is still the default and the CLI
+    # uses fluxencrypt directly, so the advisory is not discharged.
     "RUSTSEC-2023-0071",
 ]
 
