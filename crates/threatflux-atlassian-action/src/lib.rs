@@ -7,6 +7,7 @@ pub mod rules;
 
 use crate::env::{resolve_env_alias, ActionEnv};
 use crate::output::{preview_path, OutputError, OutputWriter};
+use crate::rules::dedupe::{build_lookup_plan, rank_candidates, LadderTier, LookupOptions};
 use anyhow::Result;
 use std::fs;
 use std::fs::OpenOptions;
@@ -15,6 +16,7 @@ use std::io::Write;
 use std::path::Path;
 #[cfg(test)]
 use std::sync::Mutex;
+use threatflux_atlassian_sdk::search::{SearchIssue, SearchRequest};
 #[cfg(test)]
 use threatflux_atlassian_sdk::HostPolicy;
 use threatflux_atlassian_sdk::{AtlassianClient, AtlassianConfig};
@@ -31,7 +33,13 @@ pub struct ActionOutcome {
 #[cfg(test)]
 #[derive(Debug, Clone)]
 struct TestJiraHook {
-    search_result: std::result::Result<Option<String>, String>,
+    /// The rows the lookup query answers with, not the winner.
+    ///
+    /// The election is [`rank_candidates`]'s and the hook may not pre-empt it: a
+    /// hook that handed back a key would leave the rung precedence, the
+    /// duplicate tiebreak and the summary post-filter untested on the one path
+    /// that runs them.
+    search_result: std::result::Result<Vec<SearchIssue>, String>,
     create_result: std::result::Result<String, String>,
 }
 
@@ -116,6 +124,19 @@ fn init_tracing(level: &str) {
         .try_init();
 }
 
+/// The tier name a log line may carry.
+///
+/// A `&'static str` from a closed match rather than the tier's own `Debug`:
+/// [`LadderTier::Legacy`] carries a `spec_id` that comes from a repo-local
+/// config, and an unbounded config value has no business in a log line.
+const fn tier_name(tier: &LadderTier) -> &'static str {
+    match tier {
+        LadderTier::Canonical => "canonical",
+        LadderTier::Legacy { .. } => "legacy",
+        LadderTier::SummaryFallback => "summary-fallback",
+    }
+}
+
 async fn finalize_action<SearchFn, SearchFut, CreateFn, CreateFut>(
     rule: &config::RuleConfig,
     event: &github::GitHubIssueEvent,
@@ -124,9 +145,9 @@ async fn finalize_action<SearchFn, SearchFut, CreateFn, CreateFut>(
     create_fn: CreateFn,
 ) -> Result<ActionOutcome>
 where
-    SearchFn: FnOnce(String) -> SearchFut,
-    SearchFut: Future<Output = Result<Option<String>>>,
-    CreateFn: FnOnce(threatflux_atlassian_sdk::CreateIssueRequest) -> CreateFut,
+    SearchFn: FnOnce(SearchRequest) -> SearchFut,
+    SearchFut: Future<Output = Result<Vec<SearchIssue>>>,
+    CreateFn: FnOnce(threatflux_atlassian_sdk::v3::V3CreateIssueRequest) -> CreateFut,
     CreateFut: Future<Output = Result<String>>,
 {
     let mut outcome = ActionOutcome {
@@ -137,13 +158,43 @@ where
         severity: Some(rule_match.severity.clone()),
     };
 
-    // The fallible builder, not `build_dedupe_jql`: this function returns
-    // `Result`, and its caller writes the step outputs after it. A panic here
-    // would abort the process before that, leaving the step with no outputs.
-    let jql = jira::try_build_dedupe_jql(rule, &rule_match.dedupe_label)?;
-    if let Some(issue_key) = search_fn(jql).await? {
+    // The whole ladder, not the single label this delivery would write.
+    //
+    // Looking up only `rule_match.dedupe_label` is what made the identity
+    // change unsafe to ship: an issue an earlier release created carries the
+    // `v0` digest and nothing else, so a query for the canonical label alone
+    // returns no rows, falls through to the create below, and mints a second
+    // Jira issue for an issue that is already tracked -- once for every tracked
+    // issue in every consumer, on the first delivery after the upgrade.
+    //
+    // It is still one query and one round trip: `build_lookup_plan` puts every
+    // rung in one `labels IN (...)` clause and `rank_candidates` recovers the
+    // precedence from the rows, client-side and deterministically.
+    //
+    // Fallible rather than panicking, like the builder it replaces: this
+    // function returns `Result` and its caller writes the step outputs after
+    // it, so an abort here would leave the step with no outputs at all.
+    //
+    // `LookupOptions::default` and not something read off the rule, because the
+    // two knobs that would add rungs -- `migration.legacy_labels` and
+    // `migration.summary_fallback` -- are refused at load time until the
+    // reconciliation engine can honour them. Reading them here would be reading
+    // keys no configuration that loads can set.
+    let plan = build_lookup_plan(rule, event, &LookupOptions::default())?;
+    let rows = search_fn(plan.search_request()).await?;
+    let candidates = rank_candidates(&plan, &rows);
+
+    if let Some(winner) = candidates.first() {
+        // Bounded by construction: two counts and a `&'static str`. The labels,
+        // the query and the summaries the rows carry stay out of it.
+        tracing::info!(
+            rows = rows.len(),
+            candidates = candidates.len(),
+            tier = tier_name(&winner.tier),
+            "the delivery reconciles onto an existing Jira issue"
+        );
         outcome.deduped = true;
-        outcome.jira_issue_key = Some(issue_key);
+        outcome.jira_issue_key = Some(winner.issue_key.clone());
         return Ok(outcome);
     }
 
@@ -179,7 +230,7 @@ async fn execute_rule(
             rule,
             event,
             rule_match,
-            |_jql| async move { search_result.map_err(anyhow::Error::msg) },
+            |_request| async move { search_result.map_err(anyhow::Error::msg) },
             |_request| async move { create_result.map_err(anyhow::Error::msg) },
         )
         .await;
@@ -191,16 +242,29 @@ async fn execute_rule(
         rule,
         event,
         rule_match,
-        |jql| async move {
-            let existing = client_ref.search_issues(&jql, 0, 1).await?;
-            Ok(existing.issues.first().map(|issue| issue.key.clone()))
-        },
-        // The create-only call, not `create_issue`: this closure needs the key
-        // and nothing else, and `create_issue` reads the issue back afterwards,
-        // so a failure of that second round trip would return an error for an
-        // issue Jira already has -- past the point of no return, and before
+        // Enhanced search, and through the cursor rather than a bare
+        // `search_jql`. Both choices are forced by what the answer is used for.
+        //
+        // Enhanced search, because the classification reads each row's `labels`
+        // and `summary` and the legacy GET route has no field selection to ask
+        // for them; a row that came back without its labels would be ranked as
+        // "no match", which fails closed and then creates a duplicate.
+        //
+        // The cursor, because an empty page carrying a next-page token is not
+        // proof that nothing matched -- the SDK documents exactly that -- and
+        // reading one as "no such issue" is the same duplicate by a different
+        // route. `try_collect` walks past empty pages and refuses rather than
+        // truncating at a cap, so a partial answer can never be mistaken for an
+        // absent one. The ladder is one query, so the normal case is still the
+        // single round trip it was.
+        |request| async move { Ok(client_ref.search_cursor(&request).try_collect().await?) },
+        // v3, so the description goes out as ADF rather than as the plain
+        // string the frozen v2 `CreateIssueFields` can carry. The v3 create is
+        // also one round trip by construction -- it answers with the key and
+        // never reads the issue back -- so no second call can return an error
+        // for an issue Jira already has, past the point of no return and before
         // `write_outputs` publishes the key.
-        |request| async move { Ok(client_ref.create_issue_key(request).await?) },
+        |request| async move { Ok(client_ref.v3().create_issue(request).await?.key) },
     )
     .await
 }
@@ -301,18 +365,22 @@ fn skip_if_unencodable(result: Result<()>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_client_from_env, finalize_action, run_from_env, skip_if_unencodable, write_outcome,
-        write_outputs, ActionOutcome, HostPolicy, OutputError, OutputWriter, TestJiraHook,
-        TEST_HOST_POLICY, TEST_JIRA_HOOK,
+        build_client_from_env, build_lookup_plan, finalize_action, run_from_env,
+        skip_if_unencodable, write_outcome, write_outputs, ActionOutcome, HostPolicy, LadderTier,
+        LookupOptions, OutputError, OutputWriter, SearchIssue, TestJiraHook, TEST_HOST_POLICY,
+        TEST_JIRA_HOOK,
     };
-    use crate::config::load_config_from_str;
-    use crate::github::load_issue_event_from_str;
+    use crate::config::{load_config_from_str, RuleConfig, DEDUPE_IDENTITY_FIELDS};
+    use crate::github::{load_issue_event_from_str, GitHubIssueEvent};
+    use crate::rules::dedupe::{v0_label, LOOKUP_FIELDS};
     use crate::rules::evaluate_rule;
+    use serde_json::json;
     use serial_test::serial;
     use std::cell::Cell;
     use std::collections::BTreeMap;
     use std::fs;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
     use threatflux_atlassian_testkit::env::EnvGuard;
     use threatflux_atlassian_testkit::fixtures;
@@ -712,7 +780,11 @@ mod tests {
         write_standard_config(&config_path);
         write_matching_event(&event_path, "Severity: high\nPackage: foo");
         set_test_jira_hook(
-            Ok(Some("KAN-42".to_string())),
+            Ok(vec![labelled_row(
+                "KAN-42",
+                "10042",
+                &[&standard_canonical_label()],
+            )]),
             Ok("KAN-should-not-create".to_string()),
         );
 
@@ -751,7 +823,7 @@ mod tests {
 
         write_standard_config(&config_path);
         write_matching_event(&event_path, "Severity: critical\nPackage: foo");
-        set_test_jira_hook(Ok(None), Ok("KAN-77".to_string()));
+        set_test_jira_hook(Ok(Vec::new()), Ok("KAN-77".to_string()));
 
         std::env::set_var("INPUT_CONFIG_PATH", config_path.display().to_string());
         std::env::set_var("INPUT_EVENT_NAME", "issues");
@@ -778,9 +850,14 @@ mod tests {
 
     /// The Jira endpoints one reconciliation touches, in the order it touches
     /// them. The third is the one a create must never depend on.
-    const SEARCH_ENDPOINT: &str = "/rest/api/2/search";
-    const CREATE_ENDPOINT: &str = "/rest/api/2/issue";
-    const READBACK_ENDPOINT: &str = "/rest/api/2/issue/KAN-77";
+    ///
+    /// The search is enhanced search, which is what lets the lookup ask for the
+    /// `labels` and `summary` its client-side ranking classifies rows by; the
+    /// legacy GET route has no field selection and would answer with rows the
+    /// ranking could only read as unlabelled.
+    const SEARCH_ENDPOINT: &str = "/rest/api/3/search/jql";
+    const CREATE_ENDPOINT: &str = "/rest/api/3/issue";
+    const READBACK_ENDPOINT: &str = "/rest/api/3/issue/KAN-77";
 
     #[tokio::test]
     #[serial]
@@ -793,9 +870,23 @@ mod tests {
         // to learn. This runs against a real client and a real socket rather
         // than the test hook, because the round trip that used to be there is
         // exactly what is under test.
+        //
+        // Under v3 the guarantee is structural rather than a choice of method:
+        // `JiraV3::create_issue` has no read-back to skip. The mock still stubs
+        // a 503 on the read-back route and the run still has to succeed, so the
+        // call-count assertion below stays a real regression guard against a
+        // second round trip creeping back onto the create path.
         let mock = JiraMock::start().await;
+        // `search-empty` is a v2-shaped body -- it carries `startAt`, `total`
+        // and `maxResults`, which enhanced search does not send and `SearchPage`
+        // does not model -- stubbed onto a v3 endpoint. It parses, because
+        // `SearchPage` ignores keys it does not model and reads the absent
+        // `nextPageToken` as "last page", which is the answer this test wants.
+        // It is still the wrong shape for the route, and the fixture lives in
+        // the testkit rather than here; see the note in
+        // `run_from_env_dedupes_at_the_wire_on_the_ladder_query_it_planned`.
         mock.stub(
-            "GET",
+            "POST",
             SEARCH_ENDPOINT,
             Step::json_str(200, fixtures::jira_body("search-empty")),
         )
@@ -846,6 +937,127 @@ mod tests {
         clear_test_host_policy();
     }
 
+    #[tokio::test]
+    #[serial]
+    async fn run_from_env_dedupes_at_the_wire_on_the_ladder_query_it_planned() {
+        // The other half of the ladder's proof. Everything else asserts the
+        // query at the `LookupPlan` level and stubs the reconciliation above the
+        // client, so the hop from `plan.search_request()` to the bytes in the
+        // POST body is correct only by construction. Here it is read back out of
+        // the mock's journal: the recorded `jql` has to be the planned one byte
+        // for byte, and the recorded `fields` has to be `LOOKUP_FIELDS`, because
+        // a lookup that asks a different question or comes back without the
+        // `labels` it classifies by ranks every row as "no match" and mints a
+        // duplicate Jira issue for an issue that is already tracked.
+        //
+        // The row is labelled with the *v0* digest and nothing else, which is
+        // what an issue an earlier release created carries, so this is the
+        // DEDUPE-FOUND path end to end through the real client: one search, no
+        // create.
+        //
+        // The page body is `search-one-issue` with the row's labels swapped for
+        // the digest this delivery looks for. Like `search-empty` above it is a
+        // v2-shaped body -- `startAt`, `total` and `maxResults` are not fields
+        // of an enhanced-search page -- and it parses only because `SearchPage`
+        // ignores what it does not model. The fixtures live in the testkit, so
+        // reshaping them is a change to that crate rather than to this one; the
+        // assertions below do not depend on the extra keys either way.
+        let (rule, event) = standard_rule_and_event("Severity: high\nPackage: foo");
+        let plan = build_lookup_plan(&rule, &event, &LookupOptions::default())
+            .expect("the shipped rule plans a lookup for its own fixture");
+        let legacy = plan
+            .labels()
+            .iter()
+            .find(|entry| matches!(entry.tier, LadderTier::Legacy { .. }))
+            .expect("the v0 rung is auto-registered")
+            .label
+            .clone();
+        assert_eq!(
+            legacy,
+            v0_label("dependabot-alert", &rule.jira.dedupe.fields, &event)
+                .expect("the v0 label resolves"),
+            "the row has to carry the digest an earlier release wrote"
+        );
+        assert_ne!(
+            legacy,
+            plan.canonical_label(),
+            "the row must be reachable only on the legacy rung, or this test is vacuous"
+        );
+
+        let mut page = fixtures::jira_body_json("search-one-issue");
+        page["issues"][0]["fields"]["labels"] = json!([legacy]);
+
+        let mock = JiraMock::start().await;
+        mock.stub("POST", SEARCH_ENDPOINT, Step::json(200, &page))
+            .await;
+        // Stubbed so that a create would *succeed* rather than 404. A create
+        // this run makes has to be caught by the call count below, not by the
+        // run failing for an unrelated reason.
+        mock.stub(
+            "POST",
+            CREATE_ENDPOINT,
+            Step::json_str(201, fixtures::jira_body("create-issue-response")),
+        )
+        .await;
+
+        let temp_root = unique_temp_dir("threatflux-atlassian-action");
+        fs::create_dir_all(&temp_root).expect("temp dir should be created");
+
+        let config_path = temp_root.join("jira-automation.yml");
+        let event_path = temp_root.join("event.json");
+        let output_path = temp_root.join("github-output.txt");
+
+        write_standard_config(&config_path);
+        write_matching_event(&event_path, "Severity: high\nPackage: foo");
+        clear_test_jira_hook();
+
+        let mut guard = EnvGuard::new();
+        set_runner_inputs(&mut guard, &config_path, &event_path, &output_path, "false");
+        guard
+            .set("JIRA_BASE_URL", mock.uri())
+            .set("JIRA_EMAIL", "action@example.com")
+            .set("JIRA_API_TOKEN", "test-token");
+        // As above: http on loopback is reachable only under
+        // `HostPolicy::Loopback`, which no environment variable can select.
+        set_test_host_policy(HostPolicy::Loopback);
+
+        let outcome = run_from_env()
+            .await
+            .expect("an issue the ladder finds must reconcile, not fail the step");
+        let output = output_map(&output_path);
+
+        clear_test_host_policy();
+
+        let journal = mock.journal().await;
+        let search = journal
+            .iter()
+            .find(|request| request.method == "POST" && request.path == SEARCH_ENDPOINT)
+            .expect("the run has to ask Jira the lookup question");
+        let body = search
+            .body_json()
+            .expect("the enhanced-search request is a JSON body");
+
+        assert_eq!(
+            body["jql"].as_str(),
+            Some(plan.jql()),
+            "the query on the wire is not the query the plan built"
+        );
+        assert_eq!(
+            body["fields"],
+            json!(LOOKUP_FIELDS),
+            "the lookup stopped asking for the fields it classifies rows by"
+        );
+        mock.assert_call_count("POST", SEARCH_ENDPOINT, 1).await;
+        mock.assert_call_count("POST", CREATE_ENDPOINT, 0).await;
+
+        assert!(outcome.deduped);
+        assert!(!outcome.created);
+        assert_eq!(outcome.jira_issue_key.as_deref(), Some("KAN-42"));
+        assert_eq!(output["deduped"], "true");
+        assert_eq!(output["created"], "false");
+        assert_eq!(output["jira-issue-key"], "KAN-42");
+    }
+
     /// A consumer config whose severity capture is deliberately unconstrained.
     ///
     /// `(?s)` makes `.` match a newline, so capture group 1 is whatever the
@@ -890,7 +1102,7 @@ rules:
 
         fs::write(&config_path, PERMISSIVE_SEVERITY_CONFIG).expect("config should be written");
         write_matching_event(&event_path, "<severity>high - see GHSA-1234</severity>");
-        set_test_jira_hook(Ok(None), Ok("KAN-88".to_string()));
+        set_test_jira_hook(Ok(Vec::new()), Ok("KAN-88".to_string()));
 
         let mut guard = EnvGuard::new();
         set_runner_inputs(&mut guard, &config_path, &event_path, &output_path, "false");
@@ -957,7 +1169,7 @@ rules:
 
         fs::write(&config_path, LINE_ANCHORED_SEVERITY_CONFIG).expect("config should be written");
         write_matching_event(&event_path, "Severity: high\r\nPackage: foo");
-        set_test_jira_hook(Ok(None), Ok("KAN-77".to_string()));
+        set_test_jira_hook(Ok(Vec::new()), Ok("KAN-77".to_string()));
 
         let mut guard = EnvGuard::new();
         set_runner_inputs(&mut guard, &config_path, &event_path, &output_path, "false");
@@ -1038,7 +1250,7 @@ rules:
         assert_no_outputs_published(&search_output_path);
 
         guard.set("GITHUB_OUTPUT", create_output_path.display().to_string());
-        set_test_jira_hook(Ok(None), Err("jira create was refused".to_string()));
+        set_test_jira_hook(Ok(Vec::new()), Err("jira create was refused".to_string()));
         let error = run_from_env()
             .await
             .expect_err("a failed Jira create must fail the step");
@@ -1071,7 +1283,7 @@ rules:
 
         write_standard_config(&config_path);
         write_matching_event(&event_path, "Severity: high\nPackage: foo");
-        set_test_jira_hook(Ok(None), Ok("KAN-77".to_string()));
+        set_test_jira_hook(Ok(Vec::new()), Ok("KAN-77".to_string()));
 
         let mut guard = EnvGuard::new();
         set_runner_inputs(&mut guard, &config_path, &event_path, &output_path, "false");
@@ -1118,9 +1330,9 @@ rules:
             &rule,
             &event,
             &rule_match,
-            |_jql| {
+            |_request| {
                 searched.set(true);
-                async { Ok(None) }
+                async { Ok(Vec::new()) }
             },
             |_request| {
                 created.set(true);
@@ -1131,11 +1343,206 @@ rules:
         .expect_err("a query that cannot be built must be reported, not panicked");
 
         assert!(
-            format!("{error:#}").contains("cannot build a dedupe JQL query"),
+            format!("{error:#}").contains("cannot build a dedupe lookup plan"),
             "unexpected error: {error:#}"
         );
         assert!(!searched.get(), "no Jira search may be attempted");
         assert!(!created.get(), "no Jira issue may be created");
+    }
+
+    /// Drives `finalize_action` with `answer` standing in for Jira.
+    ///
+    /// Returns the outcome and whether the create closure was reached, which is
+    /// the assertion that matters: a duplicate Jira issue is what a missed
+    /// lookup produces.
+    async fn reconcile_with<F>(
+        rule: &RuleConfig,
+        event: &GitHubIssueEvent,
+        answer: F,
+    ) -> (ActionOutcome, bool)
+    where
+        F: FnOnce(&str) -> Vec<SearchIssue>,
+    {
+        let rule_match = evaluate_rule(rule, event)
+            .expect("rule evaluation should succeed")
+            .expect("the rule matches its own fixture");
+        // An atomic rather than a `Cell`, so that the future this helper returns
+        // is `Send` and stays as spawnable as the code it stands in for.
+        let created = AtomicBool::new(false);
+
+        let outcome = finalize_action(
+            rule,
+            event,
+            &rule_match,
+            |request| {
+                let rows = answer(request.jql());
+                async move { Ok(rows) }
+            },
+            |_request| {
+                created.store(true, Ordering::SeqCst);
+                async { Ok("KAN-DUPLICATE".to_string()) }
+            },
+        )
+        .await
+        .expect("the reconciliation should succeed");
+
+        (outcome, created.load(Ordering::SeqCst))
+    }
+
+    /// [`reconcile_with`], answering the way Jira answers a `labels IN` query.
+    ///
+    /// A row comes back only when the query actually asks for a label that row
+    /// carries, which is the whole point: a stub that answered every query with
+    /// the same rows would pass on a lookup that asked for the wrong label, and
+    /// asking for the wrong label is the defect under test.
+    async fn reconcile_against(
+        rule: &RuleConfig,
+        event: &GitHubIssueEvent,
+        rows: Vec<SearchIssue>,
+    ) -> (ActionOutcome, bool) {
+        reconcile_with(rule, event, |jql| {
+            rows.into_iter()
+                .filter(|row| {
+                    row.fields
+                        .labels
+                        .iter()
+                        .any(|label| jql.contains(label.as_str()))
+                })
+                .collect()
+        })
+        .await
+    }
+
+    #[tokio::test]
+    async fn an_issue_an_earlier_release_labelled_is_deduped_rather_than_duplicated() {
+        // The regression the identity change shipped with. A GitHub issue that
+        // `0.4.x` already tracked carries the SHA-256/12 digest label and
+        // nothing else; the delivery that follows the upgrade writes -- and used
+        // to look up -- only `{prefix}-gh-{repo}-{number}`. That query returned
+        // no rows, fell through to the create, and minted a SECOND Jira issue
+        // for an issue that was already tracked. Once per tracked issue, per
+        // consumer, on the first delivery after the upgrade.
+        let (rule, event) = standard_rule_and_event("Severity: high\nPackage: foo");
+        let legacy = v0_label("dependabot-alert", &rule.jira.dedupe.fields, &event)
+            .expect("the v0 label resolves");
+        let canonical = evaluate_rule(&rule, &event)
+            .expect("rule evaluation should succeed")
+            .expect("the rule matches")
+            .dedupe_label;
+        assert_ne!(
+            legacy, canonical,
+            "the two rungs have to be different labels or this test is vacuous"
+        );
+
+        let (outcome, created) = reconcile_against(
+            &rule,
+            &event,
+            vec![labelled_row("KAN-77", "10077", &[&legacy])],
+        )
+        .await;
+
+        assert!(
+            outcome.deduped,
+            "an issue reachable on the v0 rung must reconcile, not duplicate"
+        );
+        assert!(!created, "no second Jira issue may be minted");
+        assert_eq!(outcome.jira_issue_key.as_deref(), Some("KAN-77"));
+        assert!(!outcome.created);
+    }
+
+    #[tokio::test]
+    async fn the_canonical_rung_outranks_the_legacy_one_on_the_reconciliation_path() {
+        // The ladder's precedence has to survive the trip through
+        // `finalize_action`, not only the unit test of `rank_candidates`: two
+        // rows, and the one carrying the label this release writes wins.
+        let (rule, event) = standard_rule_and_event("Severity: high\nPackage: foo");
+        let legacy = v0_label("dependabot-alert", &rule.jira.dedupe.fields, &event)
+            .expect("the v0 label resolves");
+        let canonical = evaluate_rule(&rule, &event)
+            .expect("rule evaluation should succeed")
+            .expect("the rule matches")
+            .dedupe_label;
+
+        let (outcome, created) = reconcile_against(
+            &rule,
+            &event,
+            vec![
+                labelled_row("KAN-OLD", "10001", &[&legacy]),
+                labelled_row("KAN-NEW", "10002", &[&canonical]),
+            ],
+        )
+        .await;
+
+        assert!(outcome.deduped);
+        assert!(!created);
+        assert_eq!(outcome.jira_issue_key.as_deref(), Some("KAN-NEW"));
+    }
+
+    #[tokio::test]
+    async fn a_row_no_rung_claims_does_not_suppress_the_create() {
+        // The decision is `rank_candidates`', not "the query returned
+        // something". Answered unconditionally rather than through
+        // `reconcile_against`, because a `labels IN` query cannot itself produce
+        // an unclaimed row -- the summary fallback is what will, in M4 -- and a
+        // fake that filtered the row out first would assert nothing about the
+        // path under test. Attaching to a row the ladder does not claim would be
+        // attaching to the wrong Jira issue, silently and permanently.
+        let (rule, event) = standard_rule_and_event("Severity: high\nPackage: foo");
+
+        let (outcome, created) = reconcile_with(&rule, &event, |_jql| {
+            vec![labelled_row("KAN-OTHER", "10003", &["some-other-label"])]
+        })
+        .await;
+
+        assert!(!outcome.deduped);
+        assert!(created, "an unclaimed row may not suppress the create");
+        assert_eq!(outcome.jira_issue_key.as_deref(), Some("KAN-DUPLICATE"));
+    }
+
+    #[tokio::test]
+    async fn the_fields_identity_looks_up_and_writes_the_same_label() {
+        // `jira.dedupe.identity: fields` is the documented opt-out from this
+        // release's identity change, and the release notes point consumers at it
+        // to hold ticket volume down. It has to be real on the reconciliation
+        // path: the delivery must find the `0.4.x` issue and must not find one
+        // that only carries the canonical label, or the opt-out is a key that
+        // validates and changes nothing.
+        let (mut rule, event) = standard_rule_and_event("Severity: high\nPackage: foo");
+        rule.jira.dedupe.identity = DEDUPE_IDENTITY_FIELDS.to_string();
+
+        let legacy = v0_label("dependabot-alert", &rule.jira.dedupe.fields, &event)
+            .expect("the v0 label resolves");
+        let written = evaluate_rule(&rule, &event)
+            .expect("rule evaluation should succeed")
+            .expect("the rule matches")
+            .dedupe_label;
+        assert_eq!(
+            written, legacy,
+            "under `identity: fields` the written label is the 0.4.x digest"
+        );
+
+        let (found, created) = reconcile_against(
+            &rule,
+            &event,
+            vec![labelled_row("KAN-42", "10042", &[&legacy])],
+        )
+        .await;
+        assert!(found.deduped, "the 0.4.x issue has to be found");
+        assert!(!created);
+        assert_eq!(found.jira_issue_key.as_deref(), Some("KAN-42"));
+
+        // And the canonical label is not in the query at all under this
+        // identity, so a row carrying only it is somebody else's issue.
+        let canonical =
+            crate::rules::dedupe::canonical_label("dependabot-alert", &event.identity());
+        let (missed, created) = reconcile_against(
+            &rule,
+            &event,
+            vec![labelled_row("KAN-99", "10099", &[&canonical])],
+        )
+        .await;
+        assert!(!missed.deduped);
+        assert!(created);
     }
 
     #[test]
@@ -1470,8 +1877,43 @@ rules:
         .expect("event should be written");
     }
 
+    /// One row of a lookup result, carrying the fields the ranking reads.
+    fn labelled_row(key: &str, id: &str, labels: &[&str]) -> SearchIssue {
+        serde_json::from_value(json!({
+            "id": id,
+            "key": key,
+            "fields": { "labels": labels },
+        }))
+        .expect("the search issue fixture should parse")
+    }
+
+    /// The rule and delivery `write_standard_config` and `write_matching_event`
+    /// pair, so a hook can be primed with the labels that delivery looks for.
+    fn standard_rule_and_event(body: &str) -> (RuleConfig, GitHubIssueEvent) {
+        let mut config = load_config_from_str(fixtures::action_config("dependabot-high"))
+            .expect("the shipped config should load");
+        let event = load_issue_event_from_str(
+            "issues",
+            &fixtures::github_event_with_issue_body("issues-opened-dependabot-high", body),
+        )
+        .expect("event should parse");
+        (config.rules.remove(0), event)
+    }
+
+    /// The label the standard config writes for the standard delivery.
+    ///
+    /// Derived rather than spelled out, so a change to the identity scheme moves
+    /// the fixture rows with it instead of leaving them matching nothing.
+    fn standard_canonical_label() -> String {
+        let (rule, event) = standard_rule_and_event("Severity: high\nPackage: foo");
+        evaluate_rule(&rule, &event)
+            .expect("rule evaluation should succeed")
+            .expect("the shipped rule matches its own fixture")
+            .dedupe_label
+    }
+
     fn set_test_jira_hook(
-        search_result: std::result::Result<Option<String>, String>,
+        search_result: std::result::Result<Vec<SearchIssue>, String>,
         create_result: std::result::Result<String, String>,
     ) {
         *TEST_JIRA_HOOK.lock().expect("hook lock should succeed") = Some(TestJiraHook {

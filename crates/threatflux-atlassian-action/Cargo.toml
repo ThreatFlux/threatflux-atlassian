@@ -16,6 +16,11 @@ publish = false
 
 [dependencies]
 anyhow.workspace = true
+# One lowercase hex encoder for every digest this crate renders. The dedupe
+# labels it produces are a wire format -- they are written onto live Jira issues
+# and queried back by exact string match -- so the encoding is pinned here
+# rather than open-coded per call site.
+hex.workspace = true
 # The `GITHUB_OUTPUT` heredoc delimiter mixes a per-entry nonce from the OS
 # CSPRNG into its digest, so that the delimiter published next to a value cannot
 # be used to confirm a guess at that value.
@@ -24,6 +29,10 @@ regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 yaml_serde.workspace = true
+# Read-only: `rules::dedupe::LegacyLabelSpec` can recognise a SHA-1 dedupe label
+# an earlier routing script wrote, and nothing here can be configured to mint
+# one. See that module's `LabelDigest` docs.
+sha1.workspace = true
 sha2.workspace = true
 # Deliberately no `features` list. The workspace entry is
 # `default-features = false`, so the Action links the SDK without

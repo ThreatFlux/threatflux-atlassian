@@ -33,6 +33,11 @@ threatflux-atlassian-sdk = { path = "crates/threatflux-atlassian-sdk", version =
 # here would also make `cargo deny` unable to resolve the versionless entry.
 dotenvy = "0.15"
 fluxencrypt = "0.7.2"
+# Hex encoding for the dedupe label digests. The Action's legacy label ladder
+# has to reproduce an existing on-Jira label byte for byte, so the encoding is a
+# wire format rather than a formatting detail; a shared, lowercase-only encoder
+# is one fewer place for a `{:02X}` to silently move a label.
+hex = "0.4.3"
 rand = "0.10.1"
 reqwest = { version = "0.13.2", default-features = false, features = ["form", "json", "multipart", "query", "rustls"] }
 regex = "1.12.2"
@@ -41,6 +46,13 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 yaml_serde = "0.10.4"
 serial_test = "4.0.1"
+# SHA-1 is here for one reason: recognising legacy dedupe labels that an earlier
+# generation of per-repo routing scripts wrote onto issues that are still open.
+# Nothing in this workspace *mints* a SHA-1 label -- `LegacyLabelSpec` can only
+# be pointed at one to read it -- so this is a compatibility decoder and not a
+# security primitive. Kept on the same major as `sha2` so both resolve the one
+# `digest` trait.
+sha1 = "0.11.0"
 sha2 = "0.11.0"
 thiserror = "2.0.17"
 tokio = { version = "1.52.1", features = ["fs", "macros", "rt-multi-thread", "sync"] }

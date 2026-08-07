@@ -13,6 +13,7 @@ use crate::types::{
     CreateIssueRequest, IssueSearchResult, IssueTransition, IssueTransitionsResponse, JiraField,
     JiraIssue, JiraUser, Project, UpdateIssueRequest,
 };
+use crate::v3::JiraV3;
 use base64::prelude::*;
 use reqwest::header::HeaderValue;
 use reqwest::{multipart, Certificate, Client, ClientBuilder, Method, Response};
@@ -40,7 +41,10 @@ const PREVIEW_LIMIT: usize = 48;
 /// summary — from being copied wholesale into a log sink that outlives the run
 /// and is readable by anyone with the workflow log. The `{:?}` escaping keeps a
 /// newline inside that value from ending the log line and forging the next one.
-fn preview(value: &str) -> String {
+///
+/// Visible to the crate rather than to this module so that the v3 endpoints log
+/// through the same bound; a second copy of it would be a second policy.
+pub(crate) fn preview(value: &str) -> String {
     let truncated: String = value.chars().take(PREVIEW_LIMIT).collect();
     if truncated.len() == value.len() {
         format!("{truncated:?}")
@@ -394,6 +398,44 @@ impl AtlassianClient {
     /// The response-diagnostics policy in force for this client.
     pub const fn diagnostics(&self) -> DiagnosticsPolicy {
         self.transport.diagnostics
+    }
+
+    /// The authenticated plumbing every endpoint on this client shares.
+    ///
+    /// Visible to the crate so an endpoint family implemented outside this
+    /// module — the enhanced-search methods in [`crate::search`] — reaches the
+    /// wire through this transport rather than building one of its own, and is
+    /// therefore subject to the same credentials, host policy, path builder and
+    /// diagnostics policy as the methods defined here.
+    pub(crate) const fn transport(&self) -> &Transport {
+        &self.transport
+    }
+
+    /// The Jira Cloud REST API v3 endpoints.
+    ///
+    /// v2 and v3 are the same REST API with one structural difference: a
+    /// rich-text field is a wiki-markup string under v2 and an
+    /// [ADF](crate::adf) object under v3. Reaching v3 is therefore additive —
+    /// the methods on this type keep talking v2 and keep their types, and
+    /// [`crate::v3`] carries a parallel model for the endpoints that speak ADF.
+    ///
+    /// The returned handle borrows this client's transport, so a v3 call is
+    /// subject to the same credentials, host policy and diagnostics policy as a
+    /// v2 one.
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// use threatflux_atlassian_sdk::AtlassianClient;
+    ///
+    /// # tokio_test::block_on(async {
+    /// # let client = AtlassianClient::from_env().unwrap();
+    /// let issue = client.v3().get_issue("PROJ-123").await.unwrap();
+    /// println!("{:?}", issue.fields.summary);
+    /// # });
+    /// ```
+    #[must_use]
+    pub const fn v3(&self) -> JiraV3<'_> {
+        JiraV3::new(&self.transport)
     }
 
     /// Get issue by key or ID
@@ -924,7 +966,8 @@ impl AtlassianClient {
     ///
     /// This compatibility helper calls deprecated `GET /rest/api/2/project`.
     /// Atlassian directs new implementations to paginated
-    /// `GET /rest/api/2/project/search`, whose response type is not modeled here.
+    /// `GET /rest/api/2/project/search`, which
+    /// [`crate::search::ProjectSearchPage`] models.
     /// See the
     /// [project endpoint deprecation notice](https://developer.atlassian.com/cloud/jira/platform/deprecation-notice-removal-of-get-filters-and-get-all-projects/).
     ///
@@ -1339,6 +1382,16 @@ impl Clone for AtlassianClient {
     }
 }
 
+/// Unit tests for the parts of this module that are not reachable from outside
+/// the crate: `Transport`, `build_url`, `preview`, the authorization header, and
+/// the endpoint behaviours whose assertions need a private item.
+///
+/// The end-to-end coverage of the endpoints themselves lives in
+/// `tests/jira_endpoint_journal.rs`. Those cases start a server and send real
+/// requests, so they belong in a binary compiled against the published surface —
+/// and they assert on the mock's request journal rather than on a
+/// `Mock::…expect(1)` mount, which counts only the requests a matcher already
+/// accepted and so cannot report a request that was built wrong.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1454,98 +1507,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_create_issue_fetches_issue_after_create_response() {
-        let server = MockServer::start().await;
-
-        Mock::given(method("POST"))
-            .and(path("/rest/api/2/issue"))
-            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
-                "id": "10001",
-                "key": "TEST-123",
-                "self": format!("{}/rest/api/2/issue/10001", server.uri()),
-            })))
-            .mount(&server)
-            .await;
-
-        Mock::given(method("GET"))
-            .and(path("/rest/api/2/issue/TEST-123"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "id": "10001",
-                "key": "TEST-123",
-                "self": format!("{}/rest/api/2/issue/10001", server.uri()),
-                "fields": {
-                    "summary": "Created issue",
-                    "description": "Test description",
-                    "issuetype": {
-                        "id": "10000",
-                        "name": "Task",
-                        "description": "Task issue",
-                        "iconUrl": null,
-                        "subtask": false
-                    },
-                    "status": {
-                        "id": "1",
-                        "name": "To Do",
-                        "description": "Pending work",
-                        "category": {
-                            "id": 2,
-                            "key": "new",
-                            "name": "To Do",
-                            "colorName": "blue-gray"
-                        }
-                    },
-                    "priority": null,
-                    "assignee": null,
-                    "reporter": null,
-                    "project": {
-                        "id": "10000",
-                        "key": "TEST",
-                        "name": "Test Project",
-                        "description": null,
-                        "projectTypeKey": "software",
-                        "avatarUrls": null
-                    },
-                    "created": null,
-                    "updated": null,
-                    "resolutiondate": null,
-                    "labels": [],
-                    "components": []
-                }
-            })))
-            .mount(&server)
-            .await;
-
-        let config = AtlassianConfig::builder()
-            .base_url(server.uri())
-            .username("test@example.com")
-            .api_token("test-token")
-            .host_policy(HostPolicy::Loopback)
-            .build()
-            .unwrap();
-        let client = AtlassianClient::new(config).unwrap();
-
-        let request = CreateIssueRequest {
-            fields: CreateIssueFields {
-                project: ProjectReference::by_key("TEST"),
-                summary: "Created issue".to_string(),
-                issue_type: IssueTypeReference::by_name("Task"),
-                description: Some("Test description".to_string()),
-                assignee: None,
-                priority: None,
-                labels: None,
-                components: None,
-                parent: None,
-                custom_fields: HashMap::new(),
-            },
-        };
-
-        let created_issue = client.create_issue(request).await.unwrap();
-
-        assert_eq!(created_issue.key, "TEST-123");
-        assert_eq!(created_issue.fields.summary, "Created issue");
-    }
-
-    #[tokio::test]
     async fn test_create_issue_key_returns_the_key_without_reading_the_issue_back() {
         // The POST is irreversible and answers with the key, so a caller that
         // wants only the key may not be made to depend on a second round trip:
@@ -1634,187 +1595,69 @@ mod tests {
         assert!(matches!(error, AtlassianError::Http { .. }), "{error:?}");
     }
 
+    /// Read this before "fixing" the inline comment body in `transition_issue`
+    /// into ADF.
+    ///
+    /// `transition_issue` posts to `/rest/api/2/issue/{key}/transitions`, and v2
+    /// carries a comment body as a **wiki-markup string**. ADF is the v3 wire
+    /// form; sending an ADF object to a v2 route is a 400, and quietly changing
+    /// the request shape of a published v2 method is a breaking change to
+    /// callers who asked for none. The ADF migration is deliberately additive
+    /// and lives entirely behind `client.v3()` — the ADF equivalent of this
+    /// comment is `client.v3().add_comment`, which posts to
+    /// `/rest/api/3/issue/{key}/comment`.
+    ///
+    /// The assertion is on the exact body because the failure this pins is
+    /// silent: an ADF body would still be a well-formed request to a route that
+    /// exists, and only Jira would object.
     #[tokio::test]
-    async fn test_comment_and_assignment_requests() {
+    async fn test_transition_issue_comment_body_stays_a_v2_plain_string() {
         let server = MockServer::start().await;
 
         Mock::given(method("POST"))
-            .and(path("/rest/api/2/issue/TEST-123/comment"))
-            .and(body_json(json!({ "body": "Review evidence" })))
-            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
-                "id": "10001",
-                "body": "Review evidence"
-            })))
-            .expect(1)
-            .mount(&server)
-            .await;
-        Mock::given(method("GET"))
-            .and(path("/rest/api/2/issue/TEST-123/comment"))
-            .and(query_param("startAt", "5"))
-            .and(query_param("maxResults", "10"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "startAt": 5,
-                "maxResults": 10,
-                "total": 0,
-                "comments": []
-            })))
-            .expect(1)
-            .mount(&server)
-            .await;
-        Mock::given(method("PUT"))
-            .and(path("/rest/api/2/issue/TEST-123/assignee"))
-            .and(body_json(json!({ "accountId": "account-123" })))
-            .respond_with(ResponseTemplate::new(204))
-            .expect(1)
-            .mount(&server)
-            .await;
-        Mock::given(method("PUT"))
-            .and(path("/rest/api/2/issue/TEST-123/assignee"))
-            .and(body_json(json!({ "accountId": null })))
-            .respond_with(ResponseTemplate::new(204))
-            .expect(1)
-            .mount(&server)
-            .await;
-        Mock::given(method("PUT"))
-            .and(path("/rest/api/2/issue/TEST-123"))
+            .and(path("/rest/api/2/issue/TEST-123/transitions"))
             .and(body_json(json!({
-                "fields": {
-                    "summary": "Updated summary",
-                    "labels": ["reviewed"]
-                }
+                "transition": {"id": "31"},
+                "update": {"comment": [{"add": {"body": "shipped in 3.5.4"}}]}
             })))
             .respond_with(ResponseTemplate::new(204))
             .expect(1)
             .mount(&server)
             .await;
 
-        let client = create_mock_client(&server);
-        let comment = client
-            .add_issue_comment("TEST-123", "  Review evidence  ")
+        // The padding also pins the trimming: the body is the trimmed text, and
+        // it is a bare JSON string rather than a `{"type":"doc",...}` object.
+        create_mock_client(&server)
+            .transition_issue("TEST-123", "31", Some("  shipped in 3.5.4  "))
             .await
-            .unwrap();
-        let comments = client.get_issue_comments("TEST-123", 5, 10).await.unwrap();
-        client
-            .assign_issue("TEST-123", Some("account-123"))
-            .await
-            .unwrap();
-        client.assign_issue("TEST-123", None).await.unwrap();
-        client
-            .update_issue(
-                "TEST-123",
-                HashMap::from([
-                    (
-                        "summary".to_string(),
-                        Value::String("Updated summary".to_string()),
-                    ),
-                    ("labels".to_string(), json!(["reviewed"])),
-                ]),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(comment["id"], "10001");
-        assert_eq!(comments["startAt"], 5);
+            .expect("the transition succeeds");
     }
 
     #[tokio::test]
-    async fn test_user_search_and_changelog_requests() {
-        let server = MockServer::start().await;
-
-        Mock::given(method("GET"))
-            .and(path("/rest/api/2/user/search"))
-            .and(query_param("query", "Allen"))
-            .and(query_param("startAt", "0"))
-            .and(query_param("maxResults", "25"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
-                "accountId": "account-123",
-                "displayName": "Allen Example",
-                "active": true
-            }])))
-            .expect(1)
-            .mount(&server)
-            .await;
-        Mock::given(method("GET"))
-            .and(path("/rest/api/2/issue/TEST-123/changelog"))
-            .and(query_param("startAt", "1"))
-            .and(query_param("maxResults", "2"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "startAt": 1,
-                "maxResults": 2,
-                "total": 1,
-                "values": []
-            })))
-            .expect(1)
-            .mount(&server)
-            .await;
-
-        let client = create_mock_client(&server);
-        let users = client.search_users(" Allen ", 0, 25).await.unwrap();
-        let changelog = client.get_issue_changelog("TEST-123", 1, 2).await.unwrap();
-
-        assert_eq!(users[0].account_id.as_deref(), Some("account-123"));
-        assert_eq!(changelog["maxResults"], 2);
-    }
-
-    #[tokio::test]
-    async fn test_issue_link_requests() {
+    async fn test_transition_issue_omits_the_comment_when_there_is_none() {
+        // The other half of the same pin: no comment, and no `update` member at
+        // all. A migration that reached for `RichText` here would have to invent
+        // an empty document for this case, which is how an empty comment starts
+        // appearing on every transition.
         let server = MockServer::start().await;
 
         Mock::given(method("POST"))
-            .and(path("/rest/api/2/issueLink"))
-            .and(body_json(json!({
-                "type": { "name": "Blocks" },
-                "inwardIssue": { "key": "TEST-123" },
-                "outwardIssue": { "key": "TEST-456" }
-            })))
-            .respond_with(ResponseTemplate::new(201))
-            .expect(1)
-            .mount(&server)
-            .await;
-        Mock::given(method("DELETE"))
-            .and(path("/rest/api/2/issueLink/10001"))
+            .and(path("/rest/api/2/issue/TEST-123/transitions"))
+            .and(body_json(json!({"transition": {"id": "31"}})))
             .respond_with(ResponseTemplate::new(204))
-            .expect(1)
+            .expect(2)
             .mount(&server)
             .await;
 
         let client = create_mock_client(&server);
         client
-            .create_issue_link("Blocks", "TEST-123", "TEST-456")
+            .transition_issue("TEST-123", "31", None)
             .await
-            .unwrap();
-        client.delete_issue_link("10001").await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_attachment_upload_request() {
-        let server = MockServer::start().await;
-        let attachment_path = std::env::temp_dir().join(format!(
-            "threatflux-atlassian-attachment-{}.txt",
-            std::process::id()
-        ));
-        fs::write(&attachment_path, b"review evidence").unwrap();
-
-        Mock::given(method("POST"))
-            .and(path("/rest/api/2/issue/TEST-123/attachments"))
-            .and(header("x-atlassian-token", "no-check"))
-            .and(body_string_contains("review evidence"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!([{
-                "id": "10001",
-                "filename": attachment_path.file_name().unwrap().to_string_lossy()
-            }])))
-            .expect(1)
-            .mount(&server)
-            .await;
-
-        let client = create_mock_client(&server);
-        let response = client
-            .add_issue_attachment("TEST-123", &attachment_path)
+            .expect("the transition succeeds");
+        client
+            .transition_issue("TEST-123", "31", Some("   "))
             .await
-            .unwrap();
-        fs::remove_file(&attachment_path).unwrap();
-
-        assert_eq!(response[0]["id"], "10001");
+            .expect("a whitespace-only comment is no comment");
     }
 
     #[tokio::test]

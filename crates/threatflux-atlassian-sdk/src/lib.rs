@@ -37,8 +37,9 @@
 //! [`AtlassianClient::get_projects`] calls the deprecated non-paginated
 //! `GET /rest/api/2/project` route. These helpers remain available for compatibility,
 //! but new implementations should use enhanced search at `/rest/api/2/search/jql`
-//! and paginated project search at `/rest/api/2/project/search`. This crate does not
-//! yet model those replacements' current response and pagination types. See the
+//! and paginated project search at `/rest/api/2/project/search`. Both replacements are
+//! modelled: see [`search`] for the typed request, page, and cursor types, and
+//! [`AtlassianClient::v3`] for the v3 issue surface. See the
 //! [issue-search reference](https://developer.atlassian.com/cloud/jira/platform/rest/v2/api-group-issue-search/)
 //! and [project deprecation notice](https://developer.atlassian.com/cloud/jira/platform/deprecation-notice-removal-of-get-filters-and-get-all-projects/).
 //!
@@ -83,24 +84,35 @@
 #![warn(missing_docs)]
 
 // Re-export main types for convenience
+pub use adf::{AdfBlock, AdfDocument, AdfDocumentBuilder, AdfInline, AdfListItem, AdfMark};
 pub use auth::{AccessToken, AuthManager, AuthorizationResponse, McpAuthHandler, OAuthConfig};
 pub use client::AtlassianClient;
 pub use config::{AtlassianConfig, AtlassianConfigBuilder, HostPolicy};
 pub use error::{AtlassianError, DiagnosticsPolicy, ResponseDiagnostics, Result};
 pub use jql::{JqlBuilder, JqlError, JqlOrder};
 pub use remote_client::AtlassianRemoteClient;
+// Named rather than globbed: `types::*` below already claims the unqualified
+// namespace, and a glob here would make any future name collision between the
+// two an ambiguity error in every downstream crate rather than in this one.
+pub use search::{
+    RawSearchPage, SearchIssue, SearchIssueFields, SearchLimits, SearchPage, SearchRequest,
+    SearchRequestError,
+};
 pub use secret::SecretString;
 pub use types::*;
 
 // Internal modules
+pub mod adf;
 pub mod auth;
 pub mod client;
 pub mod config;
 pub mod error;
 pub mod jql;
 pub mod remote_client;
+pub mod search;
 pub mod secret;
 pub mod types;
+pub mod v3;
 
 // Re-export commonly used external types
 pub use serde_json::Value as JsonValue;
