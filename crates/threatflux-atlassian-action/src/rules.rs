@@ -1,10 +1,10 @@
+pub mod dedupe;
+
 use crate::config::RuleConfig;
 use crate::github::GitHubIssueEvent;
 use crate::output::strip_trailing_carriage_return;
 use anyhow::Result;
 use regex::Regex;
-use sha2::{Digest, Sha256};
-use std::fmt::Write as _;
 use std::sync::LazyLock;
 
 pub(crate) const SUPPORTED_EVENT_NAME: &str = "issues";
@@ -17,6 +17,18 @@ pub struct RuleMatch {
     pub rule_id: String,
     pub severity: String,
     pub severity_title: String,
+    /// The label written onto the Jira issue this delivery reconciles to.
+    ///
+    /// [`dedupe::rule_identity_label`], so it follows the rule's declared
+    /// `jira.dedupe.identity`. By default that is
+    /// [`dedupe::canonical_label`] -- `{prefix}-gh-{repository_id}-{issue_number}`
+    /// -- and no longer a hash over `jira.dedupe.fields`. Those fields have not
+    /// stopped mattering: they still define the `v0` rung
+    /// [`dedupe::build_lookup_plan`] auto-registers, which is how issues an
+    /// earlier release labelled keep being found, and under `identity: fields`
+    /// they define this label too. What changed is which label is *written* by
+    /// default, and the consequences run both ways -- see the `dedupe` module
+    /// header.
     pub dedupe_label: String,
 }
 
@@ -61,7 +73,7 @@ pub fn evaluate_rule(rule: &RuleConfig, event: &GitHubIssueEvent) -> Result<Opti
     }
 
     let severity_title = title_case(&severity);
-    let dedupe_label = compute_dedupe_label(rule, event)?;
+    let dedupe_label = dedupe::rule_identity_label(rule, event)?;
 
     Ok(Some(RuleMatch {
         rule_id: rule.id.clone(),
@@ -166,27 +178,6 @@ fn resolve_template_value(
     }
 }
 
-fn compute_dedupe_label(rule: &RuleConfig, event: &GitHubIssueEvent) -> Result<String> {
-    let prefix = rule
-        .jira
-        .dedupe
-        .label_prefix
-        .clone()
-        .unwrap_or_else(|| "jira-automation".to_string());
-    let mut values = Vec::with_capacity(rule.jira.dedupe.fields.len());
-    for field in &rule.jira.dedupe.fields {
-        values.push(resolve_event_value(field, event)?);
-    }
-
-    let mut hasher = Sha256::new();
-    hasher.update(values.join("\n").as_bytes());
-    let mut digest = String::with_capacity(64);
-    for byte in hasher.finalize() {
-        write!(&mut digest, "{byte:02x}").expect("write to string");
-    }
-    Ok(format!("{prefix}-{}", &digest[..12]))
-}
-
 fn title_case(value: &str) -> String {
     let mut chars = value.chars();
     chars.next().map_or_else(String::new, |first| {
@@ -251,8 +242,13 @@ rules:
         assert_eq!(matched.rule_id, "dependabot-high-issues");
         assert_eq!(matched.severity, "high");
         assert_eq!(matched.severity_title, "High");
-        assert!(matched.dedupe_label.starts_with("dependabot-alert-"));
-        assert_eq!(matched.dedupe_label.len(), "dependabot-alert-".len() + 12);
+        // The emitted label is the identity, not a digest over the configured
+        // `dedupe.fields`: `{prefix}-gh-{repository_id}-{issue_number}`. The
+        // digest form survives as the `v0` rung of the lookup ladder, which is
+        // what keeps issues an earlier release labelled reachable.
+        assert_eq!(matched.dedupe_label, "dependabot-alert-gh-598178766-123");
+        super::dedupe::validate_label(&matched.dedupe_label)
+            .expect("the label the Action writes has to be one Jira accepts");
     }
 
     #[test]
@@ -527,48 +523,60 @@ rules:
     }
 
     #[test]
-    fn a_config_can_dedupe_on_the_issue_identity_instead_of_on_content() {
-        let config = load_config_from_str(IDENTITY_DEDUPE_CONFIG).expect("config should load");
-        let rule = &config.rules[0];
+    fn every_config_now_dedupes_on_the_issue_identity_rather_than_on_content() {
+        // Both configurations, not just the identity-keyed one: the emitted
+        // label no longer reads `dedupe.fields` at all, so the shipped
+        // content-hash configuration separates these two deliveries as well.
+        let shipped = load_config_from_str(fixtures::action_config("dependabot-high"))
+            .expect("the shipped config should load");
+        let identity = load_config_from_str(IDENTITY_DEDUPE_CONFIG).expect("config should load");
 
         let one = parse_event("issues-opened-dependabot");
         let two = parse_event("issues-opened-dependabot-high");
         assert_eq!(one.repository.id, two.repository.id);
         assert_ne!(one.issue.number, two.issue.number);
 
-        let first = evaluate_rule(rule, &one)
-            .expect("rule evaluation should succeed")
-            .expect("rule should match");
-        let second = evaluate_rule(rule, &two)
-            .expect("rule evaluation should succeed")
-            .expect("rule should match");
+        for rule in [&shipped.rules[0], &identity.rules[0]] {
+            let first = evaluate_rule(rule, &one)
+                .expect("rule evaluation should succeed")
+                .expect("rule should match");
+            let second = evaluate_rule(rule, &two)
+                .expect("rule evaluation should succeed")
+                .expect("rule should match");
 
-        // The content hash the shipped configs use cannot tell these two apart;
-        // an identity-keyed one has to, which is the whole point of the fields.
-        assert_ne!(
-            first.dedupe_label, second.dedupe_label,
-            "two issues in one repository must not share a dedupe label"
-        );
+            assert_ne!(
+                first.dedupe_label, second.dedupe_label,
+                "two issues in one repository must not share a dedupe label"
+            );
+        }
     }
 
     #[test]
-    fn a_retitle_does_not_move_an_identity_keyed_dedupe_label() {
-        let config = load_config_from_str(IDENTITY_DEDUPE_CONFIG).expect("config should load");
-        let rule = &config.rules[0];
-
-        let before = evaluate_rule(rule, &parse_event("issues-opened-dependabot"))
-            .expect("rule evaluation should succeed")
-            .expect("rule should match");
+    fn a_retitle_does_not_move_the_dedupe_label() {
+        // The mutable-identity bug, fixed at the source: the shipped
+        // configuration hashes `issue.title`, so before the identity change a
+        // retitle minted a second Jira issue. Asserted over the shipped
+        // configuration as well as the identity-keyed one, because it is the
+        // shipped one the bug was reachable from.
+        let shipped = load_config_from_str(fixtures::action_config("dependabot-high"))
+            .expect("the shipped config should load");
+        let identity = load_config_from_str(IDENTITY_DEDUPE_CONFIG).expect("config should load");
 
         let mut payload = fixtures::github_event_json("issues-opened-dependabot");
         payload["issue"]["title"] =
             serde_json::Value::String("Bump openssl from 1.0 to 1.1.1".to_string());
         let retitled = load_issue_event_from_str("issues", &payload.to_string())
             .expect("the retitled delivery should parse");
-        let after = evaluate_rule(rule, &retitled)
-            .expect("rule evaluation should succeed")
-            .expect("rule should match");
 
-        assert_eq!(before.dedupe_label, after.dedupe_label);
+        for rule in [&shipped.rules[0], &identity.rules[0]] {
+            let before = evaluate_rule(rule, &parse_event("issues-opened-dependabot"))
+                .expect("rule evaluation should succeed")
+                .expect("rule should match");
+            let after = evaluate_rule(rule, &retitled)
+                .expect("rule evaluation should succeed")
+                .expect("rule should match");
+
+            assert_eq!(before.dedupe_label, after.dedupe_label);
+        }
     }
 }

@@ -105,8 +105,8 @@ behavior.
 > remain public for compatibility, but new integrations should not depend on them.
 
 Atlassian documents enhanced issue search at `GET` or `POST /rest/api/2/search/jql` and paginated project search at
-`GET /rest/api/2/project/search`. This crate does not yet model the replacements' current pagination and response types.
-Use an implementation of the current endpoints for new work and track equivalent SDK implementation before migration.
+`GET /rest/api/2/project/search`. Both replacements are modelled: the `search` module carries the typed request, page,
+and cursor types, and `client.v3()` carries the v3 issue surface. New work should use those rather than the helpers above.
 See Atlassian's [issue-search reference](https://developer.atlassian.com/cloud/jira/platform/rest/v2/api-group-issue-search/)
 and [project endpoint deprecation notice](https://developer.atlassian.com/cloud/jira/platform/deprecation-notice-removal-of-get-filters-and-get-all-projects/).
 The other direct operations in the table remain the supported SDK path.

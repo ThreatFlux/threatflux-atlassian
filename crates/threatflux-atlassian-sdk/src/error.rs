@@ -500,6 +500,40 @@ pub enum AtlassianError {
         /// Reason validation failed
         message: String,
     },
+
+    /// An enhanced-search page token was rejected part-way through an iteration.
+    ///
+    /// `/search/jql` page tokens are time-limited, so a long walk or a slow
+    /// consumer can take a 400 on a page that a healthy iteration had already
+    /// been issued a token for. That 400 and a malformed-JQL 400 arrive over the
+    /// same wire and call for opposite responses — restart the search, versus fix
+    /// the query — which is why this is its own variant rather than a flavour of
+    /// [`Validation`](Self::Validation): a caller holding only the `Result` can
+    /// still tell them apart.
+    ///
+    /// # Restart, never resume
+    ///
+    /// Recovery is to build a fresh cursor and walk the result set again from its
+    /// first page, discarding what the abandoned walk delivered. It is **not** to
+    /// carry on where the walk stopped, and the SDK does not offer a way to:
+    /// between the two halves of such a walk the result set has been changing, so
+    /// the pages already delivered and the pages still to come answer the query
+    /// as it stood at two different instants. Stitching them together produces a
+    /// set that was never the answer at any instant — with issues counted twice
+    /// or missed entirely as rows shift between pages — and a caller
+    /// reconciling over it acts on it believing it is complete.
+    #[error(
+        "the enhanced-search page token for page {page_index} was rejected; page tokens are time-limited, so start the search again from its first page rather than resuming this one"
+    )]
+    PageTokenExpired {
+        /// Index of the page the rejected token asked for, counting the first
+        /// page of the iteration as zero.
+        ///
+        /// Never zero: the first request of an iteration carries no
+        /// Jira-issued token, so a failure there is a query error rather than an
+        /// expiry.
+        page_index: usize,
+    },
 }
 
 impl AtlassianError {
