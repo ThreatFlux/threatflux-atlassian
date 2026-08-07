@@ -12,13 +12,13 @@ on:
       - "LICENSE"
       - ".gitignore"
       - "docs/**"
+  # No paths-ignore here, unlike `push` above. Branch protection requires this
+  # workflow's checks, and a check that never runs never reports, so a skipped
+  # workflow leaves a pull request permanently unmergeable rather than quickly
+  # green. A documentation-only change pays a few CI minutes; the alternative is
+  # that it cannot merge at all.
   pull_request:
     branches: [main, dev]
-    paths-ignore:
-      - "**.md"
-      - "LICENSE"
-      - ".gitignore"
-      - "docs/**"
   schedule:
     - cron: "0 0 * * 0" # Weekly on Sunday at midnight UTC
   workflow_dispatch:
