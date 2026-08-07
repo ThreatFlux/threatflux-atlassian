@@ -118,7 +118,7 @@ explicit configuration.
 
 | Environment variable | Required | Default | Notes |
 | --- | --- | --- | --- |
-| `JIRA_URL` | Yes | — | HTTPS site URL while verification is enabled. |
+| `JIRA_URL` | Yes | — | Site URL. HTTPS is required unconditionally; `verify_ssl` never gates the scheme. |
 | `JIRA_USERNAME` | Yes | — | Account email; plaintext takes precedence over its encrypted form. |
 | `JIRA_API_TOKEN` | Yes | — | API token; plaintext takes precedence over its encrypted form. |
 | `JIRA_TIMEOUT` | No | `60` | Seconds; an invalid integer is an error. |
@@ -170,7 +170,7 @@ still applies, so a cleartext `JIRA_API_TOKEN` alongside a `*_ENCRYPTED` value w
 
 ```toml
 [dependencies]
-threatflux-atlassian-sdk = { version = "0.4", default-features = false, features = ["direct", "remote"] }
+threatflux-atlassian-sdk = { version = "0.5", default-features = false, features = ["direct", "remote"] }
 ```
 
 ## Errors, Retries, and Rate Limits
@@ -257,9 +257,11 @@ legacy API shape and stops before making an MCP request.
 
 ## Security
 
-`AtlassianConfig`, `AccessToken`, and related types implement `Debug` and/or `Serialize`; do not log or serialize values
-that contain credentials. Jira error response bodies are included in errors and logged at error level, so configure log
-collection accordingly. Prefer least-privilege service accounts, rotate API tokens, keep certificate verification on,
+`AtlassianConfig`, `AccessToken`, and the OAuth token types implement `Debug` but deliberately not `Serialize`, and
+their credential fields are `SecretString`, so `Debug` is redacted and serializing one is a compile error. Jira error
+response bodies are **not** included in errors and are never logged: releasing one requires opting into
+`DiagnosticsPolicy::JiraErrorFields` or `IncludeBody` via `AtlassianClient::with_diagnostics`, and even then only into
+the returned error. Prefer least-privilege service accounts, rotate API tokens, keep certificate verification on,
 and avoid committing plaintext or encrypted secrets alongside their private keys. Report vulnerabilities through the
 repository's [security policy](https://github.com/ThreatFlux/threatflux-atlassian/security/policy).
 

@@ -8,8 +8,9 @@
 use crate::error::{
     map_error_response, AtlassianError, DiagnosticsPolicy, FailureContext, FailureShape, Result,
 };
-use crate::secret::SecretString;
+use crate::secret::{zeroize_string, SecretString};
 use base64::Engine;
+use reqwest::header::HeaderValue;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -166,6 +167,37 @@ impl AuthManager {
         })
     }
 
+    /// Refuses a token endpoint that would carry the credential in cleartext.
+    ///
+    /// The requests guarded by this send the authorization code, the PKCE
+    /// verifier, and the refresh token. `OAuthConfig` has public fields and
+    /// derives `Deserialize`, so a checked constructor is not enough on its own
+    /// -- this runs on the value actually about to be posted to, which is the
+    /// same reason [`HostPolicy::check_destination`] re-runs per request.
+    ///
+    /// There is no loopback escape here, unlike the Jira transport: nothing in
+    /// this crate posts to a mock token endpoint, so adding one would only widen
+    /// the surface.
+    ///
+    /// [`HostPolicy::check_destination`]: crate::config::HostPolicy::check_destination
+    fn check_token_endpoint(endpoint: &Url) -> Result<()> {
+        if !endpoint.username().is_empty() || endpoint.password().is_some() {
+            return Err(AtlassianError::config(
+                "OAuth token endpoint must not carry credentials in its authority",
+            ));
+        }
+
+        if endpoint.scheme() != "https" {
+            return Err(AtlassianError::config(format!(
+                "OAuth token endpoint must be https, but {} was addressed over '{}'",
+                endpoint.host_str().unwrap_or("a host-less URL"),
+                endpoint.scheme()
+            )));
+        }
+
+        Ok(())
+    }
+
     /// Generate authorization URL with PKCE
     pub fn generate_authorization_url(&mut self) -> Result<String> {
         info!("Generating OAuth 2.1 authorization URL with PKCE");
@@ -227,6 +259,8 @@ impl AuthManager {
         params.insert("redirect_uri", self.config.redirect_uri.as_str());
         params.insert("client_id", &self.config.client_id);
         params.insert("code_verifier", code_verifier.expose_secret());
+
+        Self::check_token_endpoint(&self.config.token_endpoint)?;
 
         let response = self
             .client
@@ -301,6 +335,8 @@ impl AuthManager {
         params.insert("grant_type", "refresh_token");
         params.insert("refresh_token", refresh_token.expose_secret());
         params.insert("client_id", &self.config.client_id);
+
+        Self::check_token_endpoint(&self.config.token_endpoint)?;
 
         let response = self
             .client
@@ -526,18 +562,28 @@ impl McpAuthHandler {
 
     /// Get authorization header value for authenticated requests
     ///
-    /// Returns the bearer credential in plaintext, which is what the retired
-    /// Remote MCP transport still needs to build its own header.
-    pub async fn get_auth_header(&self) -> Option<String> {
-        if let Some(token) = self.proxy.get_access_token().await {
-            Some(format!(
-                "{} {}",
-                token.token_type,
-                token.access_token.expose_secret()
-            ))
-        } else {
-            None
-        }
+    /// Returns a header already marked sensitive, so reqwest and hyper render it
+    /// as `Sensitive` in their own `Debug` output and error text rather than
+    /// printing the bearer token. The plaintext never leaves this function: the
+    /// rendered value is zeroized once the header owns a copy.
+    ///
+    /// Returns `None` when there is no token, and when the token cannot be
+    /// rendered into a header value at all.
+    pub async fn get_auth_header(&self) -> Option<HeaderValue> {
+        let token = self.proxy.get_access_token().await?;
+
+        let mut rendered = format!(
+            "{} {}",
+            token.token_type,
+            token.access_token.expose_secret()
+        );
+        let header = HeaderValue::from_str(&rendered).ok().map(|mut header| {
+            header.set_sensitive(true);
+            header
+        });
+        zeroize_string(&mut rendered);
+
+        header
     }
 
     /// Check if needs re-authorization
@@ -567,6 +613,57 @@ mod tests {
                 .with_diagnostics(DiagnosticsPolicy::IncludeBody)
                 .diagnostics,
             DiagnosticsPolicy::IncludeBody
+        );
+    }
+
+    #[test]
+    fn a_cleartext_token_endpoint_is_refused_before_the_verifier_is_sent() {
+        // This request carries the authorization code and the PKCE verifier, so
+        // the refusal has to happen before the POST, not at construction: the
+        // fields are public and the type deserializes.
+        for endpoint in [
+            "http://auth.atlassian.com/oauth/token",
+            "http://127.0.0.1:8080/oauth/token",
+        ] {
+            let error = AuthManager::check_token_endpoint(&Url::parse(endpoint).unwrap())
+                .expect_err("a cleartext token endpoint must be refused");
+            let rendered = error.to_string();
+            assert!(rendered.contains("must be https"), "error was: {rendered}");
+        }
+
+        AuthManager::check_token_endpoint(
+            &Url::parse("https://auth.atlassian.com/oauth/token").unwrap(),
+        )
+        .expect("the real token endpoint must still be accepted");
+    }
+
+    #[test]
+    fn a_token_endpoint_carrying_credentials_is_refused() {
+        let error = AuthManager::check_token_endpoint(
+            &Url::parse("https://user:p4ssw0rd-CANARY@auth.atlassian.com/oauth/token").unwrap(),
+        )
+        .expect_err("userinfo in the token endpoint must be refused");
+
+        let rendered = error.to_string();
+        assert!(
+            !rendered.contains("p4ssw0rd-CANARY"),
+            "error echoed the credential: {rendered}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_mcp_bearer_header_is_marked_sensitive() {
+        // reqwest and hyper print a HeaderMap in their own Debug output, so an
+        // unmarked bearer header reaches those channels in full. The Jira
+        // transport marks its Basic header the same way.
+        let mut header = HeaderValue::from_str("Bearer token-CANARY").unwrap();
+        header.set_sensitive(true);
+
+        assert!(header.is_sensitive());
+        let rendered = format!("{header:?}");
+        assert!(
+            !rendered.contains("token-CANARY"),
+            "a sensitive header still rendered its value: {rendered}"
         );
     }
 
