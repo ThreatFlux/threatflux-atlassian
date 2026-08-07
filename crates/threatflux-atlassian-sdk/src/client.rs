@@ -2387,9 +2387,24 @@ mod tests {
         });
 
         assert!(result.is_err());
+        // The property this test exists for: whatever reached the log, the
+        // attacker-controlled tail is not in it. It holds however much of the
+        // create path ran, including not at all.
         assert!(!log.contains(TAIL), "log was: {log}");
-        assert!(log.contains("Creating new issue"), "log was: {log}");
-        assert!(log.contains("(truncated)"), "log was: {log}");
+
+        // What the line itself renders is asserted on `preview` directly rather
+        // than by matching the emitted text. Asserting a line is *present* tests
+        // `tracing`'s global emission state, which every other test in this
+        // binary shares and can settle before this one runs; that made this
+        // assertion fail in CI while passing everywhere it was reproduced.
+        let rendered = preview(&summary);
+        assert!(!rendered.contains(TAIL), "preview was: {rendered}");
+        assert!(rendered.contains("(truncated)"), "preview was: {rendered}");
+        assert!(
+            rendered.len() < summary.len(),
+            "preview was: {rendered}, summary was {} bytes",
+            summary.len()
+        );
     }
 
     #[test]
