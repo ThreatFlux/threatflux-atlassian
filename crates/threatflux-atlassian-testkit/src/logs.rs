@@ -2,7 +2,7 @@
 
 use std::cell::RefCell;
 use std::io;
-use std::sync::{Arc, Mutex, Once};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use tracing::Subscriber;
 use tracing_subscriber::fmt::MakeWriter;
@@ -137,9 +137,15 @@ impl Drop for Active {
 /// One permissive dispatcher installed once keeps every callsite interesting for
 /// good. Routing moves into the writer, per thread, so a capture no longer touches
 /// the dispatcher at all.
+///
+/// # Panics
+///
+/// Panics if another global dispatcher was installed first. Capturing is
+/// impossible in that case, and the installation is attempted once, so silently
+/// carrying on would hand every later capture an empty log instead.
 fn install_router() {
-    static INSTALLED: Once = Once::new();
-    INSTALLED.call_once(|| {
+    static INSTALLED: OnceLock<Result<(), String>> = OnceLock::new();
+    let outcome = INSTALLED.get_or_init(|| {
         let router = tracing_subscriber::fmt()
             .with_writer(|| RoutedWriter)
             .with_max_level(tracing::Level::TRACE)
@@ -147,9 +153,15 @@ fn install_router() {
             .without_time()
             .with_target(false)
             .finish();
-        // A global default someone else installed first is left alone.
-        let _ = tracing::subscriber::set_global_default(router);
+        tracing::subscriber::set_global_default(router).map_err(|error| error.to_string())
     });
+
+    if let Err(error) = outcome {
+        panic!(
+            "log capture owns the process-wide tracing dispatcher, but another \
+             global subscriber was installed first: {error}"
+        );
+    }
 }
 
 /// Runs `body` with every `tracing` event captured, returning its result and the log.
@@ -204,30 +216,42 @@ mod tests {
         // and dropped on different threads race on that cache, and a callsite
         // evaluated while no dispatcher is installed is cached as "never" — which
         // silently drops an expected line from an otherwise correct capture.
-        // The same callsite both tests share. Other tests reach it with no
-        // dispatcher installed, which is what poisons the cached interest.
-        fn emit() {
-            tracing::info!("the marker");
+        // One callsite for every thread: the marker travels as a field value, so
+        // the text differs while the cached interest stays shared. Other tests
+        // reach this callsite with no capture active, which is what used to
+        // poison that cached interest.
+        fn emit(marker: &str) {
+            tracing::info!("marker {marker}");
         }
 
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let noise: Vec<_> = (0..4)
-            .map(|_| {
+            .map(|thread| {
                 let stop = Arc::clone(&stop);
                 std::thread::spawn(move || {
+                    let marker = format!("noise-{thread}");
                     while !stop.load(std::sync::atomic::Ordering::Relaxed) {
-                        emit();
+                        emit(&marker);
                     }
                 })
             })
             .collect();
 
         let capturers: Vec<_> = (0..4)
-            .map(|_| {
-                std::thread::spawn(|| {
-                    for _ in 0..150 {
-                        let ((), log) = capture(emit);
-                        assert!(log.contains("the marker"), "log was: {log}");
+            .map(|thread| {
+                std::thread::spawn(move || {
+                    for round in 0..150 {
+                        let marker = format!("capture-{thread}-{round}");
+                        let ((), log) = capture(|| emit(&marker));
+                        assert!(log.contains(&marker), "log was: {log}");
+                        // A shared buffer would leak another thread's markers in.
+                        assert!(!log.contains("noise-"), "log was: {log}");
+                        for other in (0..4).filter(|other| *other != thread) {
+                            assert!(
+                                !log.contains(&format!("capture-{other}-")),
+                                "log was: {log}"
+                            );
+                        }
                     }
                 })
             })
