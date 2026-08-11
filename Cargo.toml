@@ -8,7 +8,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.5.1"
+version = "0.5.2"
 edition = "2021"
 rust-version = "1.96.0"
 license = "MIT"
@@ -26,7 +26,7 @@ clap = { version = "4.6.1", features = ["derive", "env"] }
 # the member's value with only a warning and builds the default feature set
 # anyway. Members that want `full` -- and with it `encrypted-env`, which pulls in
 # fluxencrypt and rsa -- opt back in with an explicit `features` list.
-threatflux-atlassian-sdk = { path = "crates/threatflux-atlassian-sdk", version = "0.5.1", default-features = false }
+threatflux-atlassian-sdk = { path = "crates/threatflux-atlassian-sdk", version = "0.5.2", default-features = false }
 # threatflux-atlassian-testkit is deliberately absent from this table. It is a
 # dev-only member that each consumer declares as a bare path dev-dependency with
 # no `version` field, so `cargo publish` strips the entry; inheriting it from
