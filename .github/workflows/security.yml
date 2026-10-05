@@ -238,9 +238,26 @@ jobs:
         with:
           tool: cargo-geiger@0.13.0
 
-      - name: Check unsafe code (informational findings)
-        run: cargo geiger --all-features
-        continue-on-error: true
+      - name: Collect unsafe code inventory (informational findings)
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target/geiger
+        run: |
+          set -euo pipefail
+          mkdir -p geiger-reports
+          for package in threatflux-atlassian-sdk threatflux-atlassian-cli threatflux-atlassian-action threatflux-atlassian-testkit; do
+            (cd "crates/$package" && cargo geiger --locked --all-features --package "$package" --output-format Json) \
+              > "geiger-reports/$package.json" 2> "geiger-reports/$package.stderr"
+            python3 scripts/check_geiger_report.py "geiger-reports/$package.json" "$package"
+          done
+
+      - name: Retain unsafe code inventory and diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: geiger-inventory
+          path: geiger-reports
+          if-no-files-found: error
+          retention-days: 5
 
   # ==========================================================================
   # OSSF Scorecard
@@ -274,7 +291,7 @@ jobs:
   security-success:
     name: Security Success
     runs-on: ubuntu-latest
-    needs: [audit, deny, supply-chain, secrets]
+    needs: [audit, deny, supply-chain, secrets, unsafe-check]
     if: always()
     steps:
       - name: Check security jobs
@@ -282,7 +299,8 @@ jobs:
           if [[ "${{ needs.audit.result }}" != "success" || \
                 "${{ needs.deny.result }}" != "success" || \
                 "${{ needs.supply-chain.result }}" != "success" || \
-                "${{ needs.secrets.result }}" != "success" ]]; then
+                "${{ needs.secrets.result }}" != "success" || \
+                "${{ needs.unsafe-check.result }}" != "success" ]]; then
             echo "Security checks failed"
             exit 1
           fi

@@ -58,7 +58,7 @@ introduced.
 ## GitHub Actions and containers
 
 All six repository workflows and the consumer workflow are reviewed against
-upstream stable action releases, with 81 uses across 20 immutable action or
+upstream stable action releases, with 82 uses across 20 immutable action or
 reusable-workflow specifications and verified inputs. The consumer example pins
 the compatible v0.5.1 Action release commit. Rust-toolchain's reviewed master
 commit is pinned as required upstream when supplying an explicit toolchain input.
@@ -70,6 +70,13 @@ ThreatFlux reusable automation; the update does not publish packages or images.
 Required coverage generation also retains a nonempty LCOV artifact independently
 of the existing optional Codecov delivery. Finding policies for informational
 scanners remain as configured by the repository.
+
+Geiger scans each of the four member manifests with the locked dependency graph
+and native JSON output, using a separate build target. Unsafe counts and
+unscanned inputs remain informational. JSON and stderr diagnostics are retained
+in a required artifact; tool errors, missing reports, or invalid package
+identity/version/path and metrics fail the job and security gate. Report
+validation self-tests run in Quick Check and the local lint guard.
 
 Manual release `source_ref` selection accepts repository branch names, tags or
 full commit IDs only when the resolved commit belongs to fetched `origin/main`

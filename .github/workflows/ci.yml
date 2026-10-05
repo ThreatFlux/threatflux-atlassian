@@ -79,6 +79,9 @@ jobs:
       - name: Check release source trust boundary
         run: python3 scripts/check_release_ref.py --self-test
 
+      - name: Check unsafe inventory report validation
+        run: python3 scripts/check_geiger_report.py --self-test
+
       # The lint levels live in [workspace.lints.clippy] and are deliberately not
       # repeated below. A crate-root `#![allow(clippy::all)]` outranks a
       # command-line -D and would leave the clippy step passing without checking
