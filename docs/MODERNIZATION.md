@@ -87,7 +87,9 @@ supporting another maintained release lineage requires a reviewed policy change.
 
 The prepare job loads the guard from the trusted workflow revision, resolves and
 checks ancestry, then passes only the vetted immutable `release_revision` to
-downstream checkouts. Compiler and tool setup precede the selected source
+downstream checkouts. A release tag that does not exist yet is created at that
+revision, and an existing tag must already resolve to it, so the tag and the
+uploaded artifacts always name the same commit. Compiler and tool setup precede the selected source
 checkout, and checkout credentials are not persisted. The existing auto-release
 owner merges its release PR into main before tagging and dispatches by that tag,
 so its normal release flow meets this policy. Temporary Git self-tests run in

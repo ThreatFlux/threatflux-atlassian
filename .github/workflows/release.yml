@@ -98,11 +98,23 @@ jobs:
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VALIDATED_RELEASE_REVISION: ${{ steps.revision.outputs.value }}
         run: |
+          set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
           TAG="v${VERSION}"
           TITLE="Release v${VERSION}"
           IS_PRERELEASE="false"
+
+          # The tag must name the same commit the artifacts are built from.
+          # An existing tag (from the fetched snapshot used for validation)
+          # has to resolve to the validated revision; a new tag is created
+          # at that revision via --target instead of the default-branch tip.
+          EXISTING_TAG_REVISION="$(git rev-parse --verify --quiet --end-of-options "refs/tags/${TAG}^{commit}" || true)"
+          if [[ -n "${EXISTING_TAG_REVISION}" && "${EXISTING_TAG_REVISION}" != "${VALIDATED_RELEASE_REVISION}" ]]; then
+            echo "::error::Tag ${TAG} points at ${EXISTING_TAG_REVISION}, not the validated release revision ${VALIDATED_RELEASE_REVISION}. Re-run with source_ref=${TAG} to rebuild that release."
+            exit 1
+          fi
 
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.prerelease && 'true' || 'false' }}" == "true" ]]; then
             IS_PRERELEASE="true"
@@ -121,12 +133,14 @@ jobs:
             if [[ "${IS_PRERELEASE}" == "true" ]]; then
               gh release create "$TAG" \
                 --repo "$GITHUB_REPOSITORY" \
+                --target "$VALIDATED_RELEASE_REVISION" \
                 --title "$TITLE" \
                 --notes-file release_notes.md \
                 --prerelease
             else
               gh release create "$TAG" \
                 --repo "$GITHUB_REPOSITORY" \
+                --target "$VALIDATED_RELEASE_REVISION" \
                 --title "$TITLE" \
                 --notes-file release_notes.md
             fi
