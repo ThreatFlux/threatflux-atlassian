@@ -59,7 +59,7 @@ NC := \033[0m
 # repo root, so without this make would consider `docs` up to date and silently
 # skip rustdoc and docs-check (and therefore drop them from `ci`).
 .PHONY: help dev-setup install-hooks build build-release check \
-        fmt fmt-check lint-config lint lint-strict lint-fix \
+        fmt fmt-check lint-config release-ref lint lint-strict lint-fix \
         test test-verbose test-doc test-features test-features-full \
         coverage coverage-html coverage-summary \
         audit deny advisory-ignores dep-gate sbom security \
@@ -138,7 +138,10 @@ fmt-check: ## Check code formatting
 	@$(CARGO) fmt --all -- --check
 	@printf '$(GREEN)Format check passed!$(NC)\n'
 
-lint-config: ## Verify the workspace Clippy configuration is not bypassed
+release-ref: ## Verify trusted release revision selection with temporary Git fixtures
+	@python3 scripts/check_release_ref.py --self-test
+
+lint-config: release-ref ## Verify the workspace Clippy configuration is not bypassed
 	@printf '$(CYAN)Checking lint configuration...$(NC)\n'
 	@python3 scripts/check_lint_config.py --self-test
 	@python3 scripts/check_lint_config.py

@@ -18,7 +18,7 @@ on:
         required: true
         type: string
       source_ref:
-        description: "Git ref to build from (defaults to the workflow ref)"
+        description: "Main-history branch, tag or full commit to build (defaults to the workflow ref)"
         required: false
         type: string
       prerelease:
@@ -48,24 +48,25 @@ jobs:
       contents: write
     outputs:
       version: ${{ steps.version.outputs.version }}
-      source_ref: ${{ steps.source_ref.outputs.source_ref }}
+      release_revision: ${{ steps.revision.outputs.value }}
     steps:
-      - name: Determine source ref
-        id: source_ref
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.source_ref }}" ]]; then
-            SOURCE_REF="${{ github.event.inputs.source_ref }}"
-          else
-            SOURCE_REF="${GITHUB_REF}"
-          fi
-          echo "source_ref=${SOURCE_REF}" >> "$GITHUB_OUTPUT"
-
-      - name: Checkout
+      - name: Checkout trusted workflow revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-          ref: ${{ steps.source_ref.outputs.source_ref }}
+          ref: ${{ github.sha }}
           persist-credentials: false
+
+      - name: Validate release source
+        id: revision
+        env:
+          REQUESTED_RELEASE_SOURCE: ${{ inputs.source_ref || github.ref }}
+        run: python3 scripts/check_release_ref.py
+
+      - name: Checkout validated release revision
+        env:
+          VALIDATED_RELEASE_REVISION: ${{ steps.revision.outputs.value }}
+        run: git checkout --detach "$VALIDATED_RELEASE_REVISION" --
 
       - name: Determine version
         id: version
@@ -196,7 +197,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.prepare.outputs.source_ref }}
+          ref: ${{ needs.prepare.outputs.release_revision }}
           persist-credentials: false
 
       - name: Build (cross)
@@ -274,7 +275,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.prepare.outputs.source_ref }}
+          ref: ${{ needs.prepare.outputs.release_revision }}
           persist-credentials: false
 
       - name: Generate SBOM files
@@ -395,7 +396,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.prepare.outputs.source_ref }}
+          ref: ${{ needs.prepare.outputs.release_revision }}
           persist-credentials: false
 
       - name: Verify SDK publish

@@ -60,8 +60,8 @@ introduced.
 All six repository workflows and the consumer workflow are reviewed against
 upstream stable action releases, with 81 uses across 20 immutable action or
 reusable-workflow specifications and verified inputs. The consumer example pins
-the compatible v0.5.1 Action release commit. Rust-toolchain has no release tags;
-its current upstream source is pinned to a reviewed full commit SHA.
+the compatible v0.5.1 Action release commit. Rust-toolchain's reviewed master
+commit is pinned as required upstream when supplying an explicit toolchain input.
 CI explicitly selects and logs the requested stable, beta, nightly or MSRV
 compiler. Container builds use the updated Rust compiler and verified immutable
 base-image digests. Existing release ownership remains with the pinned
@@ -70,6 +70,22 @@ ThreatFlux reusable automation; the update does not publish packages or images.
 Required coverage generation also retains a nonempty LCOV artifact independently
 of the existing optional Codecov delivery. Finding policies for informational
 scanners remain as configured by the repository.
+
+Manual release `source_ref` selection accepts repository branch names, tags or
+full commit IDs only when the resolved commit belongs to fetched `origin/main`
+history. Existing release tags and older main commits remain supported. Fork,
+PR and unmerged branch commits are rejected before release preparation, builds,
+SBOM generation or publication. A backport must first enter main history;
+supporting another maintained release lineage requires a reviewed policy change.
+
+The prepare job loads the guard from the trusted workflow revision, resolves and
+checks ancestry, then passes only the vetted immutable `release_revision` to
+downstream checkouts. Compiler and tool setup precede the selected source
+checkout, and checkout credentials are not persisted. The existing auto-release
+owner merges its release PR into main before tagging and dispatches by that tag,
+so its normal release flow meets this policy. Temporary Git self-tests run in
+Quick Check and the local lint guard, including rejection and branch-movement
+cases. No scanner finding is dismissed or excluded to implement this boundary.
 
 ## Validation
 
