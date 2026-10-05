@@ -193,7 +193,7 @@ test-features: dep-gate ## Test feature combinations
 
 test-features-full: ## Test all feature powerset (requires cargo-hack)
 	@printf '$(CYAN)Testing full feature powerset...$(NC)\n'
-	@cargo hack check --workspace --feature-powerset --no-dev-deps
+	@cargo hack check --locked --workspace --all-targets --feature-powerset
 	@printf '$(GREEN)Feature powerset passed!$(NC)\n'
 
 # =============================================================================

@@ -265,7 +265,7 @@ jobs:
         run: cargo check --locked --workspace --all-features
 
       - name: Check feature combinations
-        run: cargo hack check --locked --workspace --feature-powerset --no-dev-deps --exclude-no-default-features
+        run: cargo hack check --locked --workspace --all-targets --feature-powerset
 
       # `encrypted-env` is the only feature that gates dependencies, so it is the
       # only one whose gate can silently stop holding: `default-features = false`

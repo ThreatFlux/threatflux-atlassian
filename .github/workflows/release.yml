@@ -65,6 +65,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ steps.source_ref.outputs.source_ref }}
+          persist-credentials: false
 
       - name: Determine version
         id: version
@@ -168,11 +169,7 @@ jobs:
             artifact: windows-amd64
     runs-on: ${{ matrix.os }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.prepare.outputs.source_ref }}
-
+      # Install and verify trusted tools before checking out a custom release ref.
       - name: Install Rust
         uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master source pin
         with:
@@ -195,6 +192,12 @@ jobs:
         uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
         with:
           tool: cross@0.2.5
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.source_ref }}
+          persist-credentials: false
 
       - name: Build (cross)
         if: matrix.use_cross
@@ -252,11 +255,7 @@ jobs:
     needs: prepare
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.prepare.outputs.source_ref }}
-
+      # Install and verify trusted tools before checking out a custom release ref.
       - name: Install Rust
         uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master source pin
         with:
@@ -271,6 +270,12 @@ jobs:
         uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
         with:
           tool: cargo-cyclonedx@0.5.9
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.source_ref }}
+          persist-credentials: false
 
       - name: Generate SBOM files
         run: |
@@ -324,11 +329,7 @@ jobs:
     runs-on: ubuntu-latest
     if: "!contains(needs.prepare.outputs.version, '-')"
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.prepare.outputs.source_ref }}
-
+      # Install and verify trusted tools before checking out a custom release ref.
       - name: Install Rust
         uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master source pin
         with:
@@ -390,6 +391,12 @@ jobs:
                       f"{'already exists on crates.io' if published else 'is not published yet'}"
                   )
           PY
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.source_ref }}
+          persist-credentials: false
 
       - name: Verify SDK publish
         if: steps.check_token.outputs.has_token == 'true' && steps.publish_state.outputs.sdk_published != 'true'
