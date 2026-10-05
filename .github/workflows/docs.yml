@@ -2,14 +2,14 @@ name: Docs contract
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main]
     paths:
       - "README.md"
       - "docs/**"
       - "crates/**/README.md"
       - ".github/workflows/docs.yml"
   pull_request:
-    branches: [main, dev]
+    branches: [main]
     paths:
       - "README.md"
       - "docs/**"

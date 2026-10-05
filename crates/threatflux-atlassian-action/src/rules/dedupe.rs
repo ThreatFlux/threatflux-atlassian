@@ -1741,6 +1741,6 @@ mod tests {
     #[test]
     fn ranking_an_empty_result_set_yields_no_candidates() {
         let plan = ranking_plan();
-        assert!(rank_candidates(&plan, &[]).is_empty());
+        assert_eq!(rank_candidates(&plan, &[]), [] as [Candidate; 0]);
     }
 }

@@ -1091,7 +1091,7 @@ mod diagnostics_tests {
         let diagnostics = error.diagnostics().expect("a response error is diagnosed");
         assert_eq!(diagnostics.status, Some(500));
         assert_eq!(diagnostics.policy, DiagnosticsPolicy::MetadataOnly);
-        assert!(diagnostics.error_messages.is_empty());
+        assert_eq!(diagnostics.error_messages, [] as [String; 0]);
         assert!(diagnostics.field_errors.is_empty());
         assert!(diagnostics.body.is_none());
         assert!(

@@ -3,7 +3,7 @@
 [![crates.io](https://img.shields.io/crates/v/threatflux-atlassian-sdk.svg)](https://crates.io/crates/threatflux-atlassian-sdk)
 [![docs.rs](https://docs.rs/threatflux-atlassian-sdk/badge.svg)](https://docs.rs/threatflux-atlassian-sdk)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![MSRV](https://img.shields.io/badge/MSRV-1.96.0-orange.svg)](https://www.rust-lang.org)
+[![MSRV](https://img.shields.io/badge/MSRV-1.97.1-orange.svg)](https://www.rust-lang.org)
 [![CI](https://github.com/ThreatFlux/threatflux-atlassian/actions/workflows/ci.yml/badge.svg)](https://github.com/ThreatFlux/threatflux-atlassian/actions/workflows/ci.yml)
 [![Security](https://github.com/ThreatFlux/threatflux-atlassian/actions/workflows/security.yml/badge.svg)](https://github.com/ThreatFlux/threatflux-atlassian/actions/workflows/security.yml)
 [![Docs contract](https://github.com/ThreatFlux/threatflux-atlassian/actions/workflows/docs.yml/badge.svg)](https://github.com/ThreatFlux/threatflux-atlassian/actions/workflows/docs.yml)
@@ -43,7 +43,7 @@ cargo add threatflux-atlassian-sdk
 cargo add tokio --features macros,rt-multi-thread
 ```
 
-Current `main` declares Rust 1.96.0 as its minimum supported Rust version (MSRV). See
+Current `main` declares Rust 1.97.1 as its minimum supported Rust version (MSRV). See
 [Version and release channels](#version-and-release-channels) before using a Git tag as a package version.
 
 ## Quickstart
@@ -201,10 +201,13 @@ Start with the [example rules](examples/github-automation/dependabot-high.yml), 
 
 ## Features
 
-The SDK declares `default`, `full`, `direct`, `remote`, and `ssl-verification`. These are compatibility markers: they do
-not gate modules or dependencies, and `ssl-verification` does not control runtime certificate verification.
-See the [SDK feature table](crates/threatflux-atlassian-sdk/README.md#feature-flags) before using
-`default-features = false` to optimize a build.
+The SDK's default `full` feature enables `direct`, `remote`, and `encrypted-env`.
+`encrypted-env` includes FluxEncrypt and encrypted credential support; disabling
+default features removes that dependency path. `direct`, `remote`, and
+`ssl-verification` remain compatibility markers that do not gate modules, and
+`ssl-verification` does not control runtime certificate verification. See the
+[SDK feature table](crates/threatflux-atlassian-sdk/README.md#feature-flags) for the
+complete feature contract.
 
 ## Documentation
 
@@ -233,8 +236,10 @@ make docs-check
 make ci
 ```
 
-The workspace pins Rust 1.97.1 for development and CI while checking the 1.96.0 MSRV separately. See
+The workspace pins Rust 1.99.0 for development and CI while checking the 1.97.1 MSRV separately. See
 [`Makefile`](Makefile) for focused formatting, lint, test, feature, rustdoc, security, and packaging targets.
+The [modernization record](docs/MODERNIZATION.md) documents verified versions,
+compatibility, and validation for the October 2026 update.
 
 ## Security
 

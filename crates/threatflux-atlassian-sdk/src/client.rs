@@ -1701,7 +1701,7 @@ mod tests {
         let client = create_mock_client(&server);
         let issues = client.get_project_issues("TEST", 50).await.unwrap();
 
-        assert!(issues.is_empty());
+        assert_eq!(issues, [] as [JiraIssue; 0]);
     }
 
     #[tokio::test]
@@ -1715,7 +1715,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(issues.is_empty());
+        assert_eq!(issues, [] as [JiraIssue; 0]);
     }
 
     #[tokio::test]

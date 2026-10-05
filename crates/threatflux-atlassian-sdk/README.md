@@ -3,7 +3,7 @@
 [![crates.io](https://img.shields.io/crates/v/threatflux-atlassian-sdk.svg)](https://crates.io/crates/threatflux-atlassian-sdk)
 [![docs.rs](https://docs.rs/threatflux-atlassian-sdk/badge.svg)](https://docs.rs/threatflux-atlassian-sdk)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/ThreatFlux/threatflux-atlassian/blob/main/LICENSE)
-[![MSRV](https://img.shields.io/badge/MSRV-1.96.0-orange.svg)](https://www.rust-lang.org)
+[![MSRV](https://img.shields.io/badge/MSRV-1.97.1-orange.svg)](https://www.rust-lang.org)
 [![CI](https://github.com/ThreatFlux/threatflux-atlassian/actions/workflows/ci.yml/badge.svg)](https://github.com/ThreatFlux/threatflux-atlassian/actions/workflows/ci.yml)
 [![Security](https://github.com/ThreatFlux/threatflux-atlassian/actions/workflows/security.yml/badge.svg)](https://github.com/ThreatFlux/threatflux-atlassian/actions/workflows/security.yml)
 
@@ -41,7 +41,7 @@ cargo add tokio --features macros,rt-multi-thread
 ```
 
 This resolves the latest published [SDK crate](https://crates.io/crates/threatflux-atlassian-sdk). The current repository
-source declares Rust 1.96.0 as its minimum supported Rust version (MSRV).
+source declares Rust 1.97.1 as its minimum supported Rust version (MSRV).
 
 ## Quickstart
 

@@ -134,7 +134,7 @@ mod tests {
 
     #[test]
     fn test_version() {
-        assert!(!version().is_empty());
+        assert_ne!(version(), "");
     }
 
     #[test]

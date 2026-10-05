@@ -266,7 +266,7 @@ mod tests {
         let page: ProjectSearchPage =
             serde_json::from_value(json!({"values": [], "isLast": true})).expect("deserializes");
 
-        assert!(page.values.is_empty());
+        assert_eq!(page.values, [] as [SearchProject; 0]);
         assert!(page.find_by_key("KAN").is_none());
     }
 

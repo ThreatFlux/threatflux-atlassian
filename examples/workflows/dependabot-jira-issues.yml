@@ -16,10 +16,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Create or dedupe Jira issue
-        uses: ThreatFlux/threatflux-atlassian@<tag-or-sha> # Replace with the first released ref after merge
+        uses: ThreatFlux/threatflux-atlassian@e030915305318b226066a85518e419c53237270e # v0.5.1; choose the desired release
         with:
           config-path: .github/threatflux/jira-automation.yml
         env:

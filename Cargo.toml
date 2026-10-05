@@ -10,16 +10,16 @@ resolver = "2"
 [workspace.package]
 version = "0.5.1"
 edition = "2021"
-rust-version = "1.96.0"
+rust-version = "1.97.1"
 license = "MIT"
 repository = "https://github.com/ThreatFlux/threatflux-atlassian"
 homepage = "https://github.com/ThreatFlux/threatflux-atlassian"
 
 [workspace.dependencies]
-anyhow = "1.0.100"
-base64 = "0.23.0"
-chrono = { version = "0.4.42", features = ["serde"] }
-clap = { version = "4.6.1", features = ["derive", "env"] }
+anyhow = "1.0.104"
+base64 = "0.23.1"
+chrono = { version = "0.4.45", features = ["serde"] }
+clap = { version = "4.6.7", features = ["derive", "env"] }
 # `default-features = false` has to live here, not on the member entries. When a
 # member writes `threatflux-atlassian-sdk = { workspace = true, default-features
 # = false }` and this table does not spell `default-features` out, cargo drops
@@ -31,20 +31,20 @@ threatflux-atlassian-sdk = { path = "crates/threatflux-atlassian-sdk", version =
 # dev-only member that each consumer declares as a bare path dev-dependency with
 # no `version` field, so `cargo publish` strips the entry; inheriting it from
 # here would also make `cargo deny` unable to resolve the versionless entry.
-dotenvy = "0.15"
-fluxencrypt = "0.7.2"
+dotenvy = "0.15.7"
+fluxencrypt = "0.7.5"
 # Hex encoding for the dedupe label digests. The Action's legacy label ladder
 # has to reproduce an existing on-Jira label byte for byte, so the encoding is a
 # wire format rather than a formatting detail; a shared, lowercase-only encoder
 # is one fewer place for a `{:02X}` to silently move a label.
 hex = "0.4.3"
-rand = "0.10.1"
-reqwest = { version = "0.13.2", default-features = false, features = ["form", "json", "multipart", "query", "rustls"] }
-regex = "1.12.2"
-schemars = "1.2"
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
-yaml_serde = "0.10.4"
+rand = "0.10.3"
+reqwest = { version = "0.13.5", default-features = false, features = ["form", "json", "multipart", "query", "rustls"] }
+regex = "1.13.1"
+schemars = "1.2.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+yaml_serde = "0.10.7"
 serial_test = "4.0.1"
 # SHA-1 is here for one reason: recognising legacy dedupe labels that an earlier
 # generation of per-repo routing scripts wrote onto issues that are still open.
@@ -54,14 +54,14 @@ serial_test = "4.0.1"
 # `digest` trait.
 sha1 = "0.11.0"
 sha2 = "0.11.0"
-thiserror = "2.0.17"
-tokio = { version = "1.52.1", features = ["fs", "macros", "rt-multi-thread", "sync"] }
-tokio-test = "0.4"
+thiserror = "2.0.21"
+tokio = { version = "1.53.2", features = ["fs", "macros", "rt-multi-thread", "sync"] }
+tokio-test = "0.4.6"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["fmt", "env-filter"] }
 url = { version = "2.5.8", features = ["serde"] }
-uuid = { version = "1.23.1", features = ["serde", "v4"] }
-wiremock = "0.6"
+uuid = { version = "1.27.0", features = ["serde", "v4"] }
+wiremock = "0.6.5"
 zeroize = { version = "1.9.0", features = ["derive"] }
 
 # Clippy levels live here, not in crate-root `#![allow(...)]` attributes: a
