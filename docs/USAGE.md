@@ -20,7 +20,7 @@ the Cargo package version:
 threatflux-atlassian-sdk = { git = "https://github.com/ThreatFlux/threatflux-atlassian.git", rev = "<full-commit-sha>" }
 ```
 
-Current source declares Rust 1.96.0 as its MSRV. Crates.io packages and
+Current source declares Rust 1.97.1 as its MSRV. Crates.io packages and
 [GitHub source or binary releases](https://github.com/ThreatFlux/threatflux-atlassian/releases) are separate channels.
 A release tag can differ from the Cargo package versions embedded in its source, so inspect the tagged manifest when
 exact package provenance matters.

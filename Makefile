@@ -7,8 +7,8 @@
 # =============================================================================
 
 CARGO ?= cargo
-RUST_MSRV ?= 1.96.0
-RUST_TOOLCHAIN ?= 1.97.1
+RUST_MSRV ?= 1.97.1
+RUST_TOOLCHAIN ?= 1.99.0
 
 # Docker configuration
 # NOTE: DOCKER_IMAGE is an explicit constant, deliberately NOT
@@ -59,7 +59,7 @@ NC := \033[0m
 # repo root, so without this make would consider `docs` up to date and silently
 # skip rustdoc and docs-check (and therefore drop them from `ci`).
 .PHONY: help dev-setup install-hooks build build-release check \
-        fmt fmt-check lint-config lint lint-strict lint-fix \
+        fmt fmt-check lint-config release-ref geiger-report lint lint-strict lint-fix \
         test test-verbose test-doc test-features test-features-full \
         coverage coverage-html coverage-summary \
         audit deny advisory-ignores dep-gate sbom security \
@@ -87,11 +87,11 @@ dev-setup: ## Install development tools
 	@printf '$(CYAN)Installing development tools...$(NC)\n'
 	@rustup toolchain install $(RUST_TOOLCHAIN) --profile minimal
 	@rustup component add rustfmt clippy llvm-tools-preview --toolchain $(RUST_TOOLCHAIN)
-	@$(CARGO) install cargo-llvm-cov --locked
-	@$(CARGO) install cargo-audit --locked
-	@$(CARGO) install cargo-deny --locked
-	@$(CARGO) install cargo-cyclonedx --locked
-	@$(CARGO) install cargo-hack --locked
+	@$(CARGO) install cargo-llvm-cov --locked --version 0.9.1
+	@$(CARGO) install cargo-audit --locked --version 0.22.2
+	@$(CARGO) install cargo-deny --locked --version 0.20.2
+	@$(CARGO) install cargo-cyclonedx --locked --version 0.5.9
+	@$(CARGO) install cargo-hack --locked --version 0.6.45
 	@printf '$(GREEN)Development tools installed!$(NC)\n'
 
 # The hook body is written with printf, not `echo '...\n...'`: /bin/bash emits a
@@ -100,9 +100,10 @@ dev-setup: ## Install development tools
 # it is not a makefile comment.
 install-hooks: ## Install git pre-commit hooks
 	@printf '$(CYAN)Installing git hooks...$(NC)\n'
-	@mkdir -p .git/hooks
-	@printf '#!/bin/sh\nmake pre-commit\n' > .git/hooks/pre-commit
-	@chmod +x .git/hooks/pre-commit
+	@set -e; hook_dir="$$(git rev-parse --git-path hooks)"; \
+		mkdir -p "$$hook_dir"; \
+		printf '#!/bin/sh\nmake pre-commit\n' > "$$hook_dir/pre-commit"; \
+		chmod +x "$$hook_dir/pre-commit"
 	@printf '$(GREEN)Git hooks installed!$(NC)\n'
 
 # =============================================================================
@@ -137,7 +138,13 @@ fmt-check: ## Check code formatting
 	@$(CARGO) fmt --all -- --check
 	@printf '$(GREEN)Format check passed!$(NC)\n'
 
-lint-config: ## Verify the workspace Clippy configuration is not bypassed
+release-ref: ## Verify trusted release revision selection with temporary Git fixtures
+	@python3 scripts/check_release_ref.py --self-test
+
+geiger-report: ## Verify informational inventory identity, metrics and report failures
+	@python3 scripts/check_geiger_report.py --self-test
+
+lint-config: release-ref geiger-report ## Verify the workspace Clippy configuration is not bypassed
 	@printf '$(CYAN)Checking lint configuration...$(NC)\n'
 	@python3 scripts/check_lint_config.py --self-test
 	@python3 scripts/check_lint_config.py
@@ -192,7 +199,7 @@ test-features: dep-gate ## Test feature combinations
 
 test-features-full: ## Test all feature powerset (requires cargo-hack)
 	@printf '$(CYAN)Testing full feature powerset...$(NC)\n'
-	@cargo hack check --workspace --feature-powerset --no-dev-deps
+	@cargo hack check --locked --workspace --all-targets --feature-powerset
 	@printf '$(GREEN)Feature powerset passed!$(NC)\n'
 
 # =============================================================================
@@ -244,12 +251,15 @@ dep-gate: ## Verify the SDK encrypted-env feature keeps fluxencrypt out of the g
 sbom: ## Generate CycloneDX SBOMs for the SDK and CLI
 	@printf '$(CYAN)Generating SBOMs...$(NC)\n'
 	@mkdir -p sbom
-	@rm -f sbom/*.json crates/threatflux-atlassian-sdk/*-sbom.json crates/threatflux-atlassian-cli/*-sbom.json crates/threatflux-atlassian-action/*-sbom.json
+	@rm -f sbom/*.json crates/threatflux-atlassian-sdk/*-sbom.json \
+		crates/threatflux-atlassian-cli/*-sbom.json crates/threatflux-atlassian-action/*-sbom.json \
+		crates/threatflux-atlassian-testkit/*-sbom.json
 	@cargo cyclonedx --manifest-path crates/threatflux-atlassian-sdk/Cargo.toml --all-features --format json --spec-version 1.5 --override-filename threatflux-atlassian-sdk-sbom
 	@cargo cyclonedx --manifest-path crates/threatflux-atlassian-cli/Cargo.toml --all-features --format json --spec-version 1.5 --override-filename threatflux-atlassian-cli-sbom
 	@cp crates/threatflux-atlassian-sdk/threatflux-atlassian-sdk-sbom.json sbom/
 	@cp crates/threatflux-atlassian-cli/threatflux-atlassian-cli-sbom.json sbom/
-	@rm -f crates/threatflux-atlassian-sdk/*-sbom.json crates/threatflux-atlassian-cli/*-sbom.json crates/threatflux-atlassian-action/*-sbom.json
+	@rm -f crates/threatflux-atlassian-sdk/*-sbom.json crates/threatflux-atlassian-cli/*-sbom.json \
+		crates/threatflux-atlassian-action/*-sbom.json crates/threatflux-atlassian-testkit/*-sbom.json
 	@printf '$(GREEN)SBOMs written to sbom/$(NC)\n'
 
 security: audit deny ## Run all security checks
@@ -287,12 +297,12 @@ bench-check: ## Check benchmarks compile
 # MSRV
 # =============================================================================
 
-# `|| true` is scoped to the install: the MSRV toolchain is usually already
-# present, and the check below is what must fail.
 msrv: ## Check minimum supported Rust version
 	@printf '$(CYAN)Checking MSRV (%s)...$(NC)\n' '$(RUST_MSRV)'
-	@rustup toolchain install $(RUST_MSRV) --profile minimal >/dev/null 2>&1 || true
-	@rustup run $(RUST_MSRV) cargo check --workspace --all-features
+	@rustup toolchain install $(RUST_MSRV) --profile minimal
+	@rustup run $(RUST_MSRV) rustc --version
+	@rustup run $(RUST_MSRV) cargo --version
+	@rustup run $(RUST_MSRV) cargo check --locked --workspace --all-features
 	@printf '$(GREEN)MSRV check passed!$(NC)\n'
 
 # =============================================================================

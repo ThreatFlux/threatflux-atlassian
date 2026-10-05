@@ -454,7 +454,7 @@ async fn v2_issue_links_are_created_by_body_and_deleted_by_path() {
     // reached the path rather than a query parameter or a body.
     let deleted = only_request(&mock, "DELETE", "/rest/api/2/issueLink/10001").await;
     assert_eq!(deleted.query, None);
-    assert!(deleted.body.is_empty());
+    assert_eq!(deleted.body, [] as [u8; 0]);
 }
 
 /// The attachment upload stays v2, and is the one request that is not JSON.

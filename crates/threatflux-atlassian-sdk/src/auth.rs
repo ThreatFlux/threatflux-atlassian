@@ -436,6 +436,7 @@ impl AuthorizationProxy {
     // `handle_oauth_callback`; dropping `async` would break every caller.
     #[allow(
         clippy::unused_async,
+        clippy::unused_async_trait_impl,
         reason = "published async OAuth flow entry point"
     )]
     pub async fn start_authorization_flow(&mut self) -> Result<String> {

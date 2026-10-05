@@ -463,7 +463,7 @@ rules:
 
     #[test]
     fn title_case_returns_empty_string_for_empty_input() {
-        assert!(title_case("").is_empty());
+        assert_eq!(title_case(""), "");
     }
 
     #[test]

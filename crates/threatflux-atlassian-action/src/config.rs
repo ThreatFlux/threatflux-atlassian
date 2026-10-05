@@ -620,9 +620,7 @@ fn resolve_env_var(name: &str, default: Option<&str>) -> Result<String> {
 /// every config that loads, so a consumer's existing Jira issues keep matching.
 /// Nothing legitimate is lost: none of these characters can be in a Jira label,
 /// so a config carrying one could never have deduped against a real issue.
-// Not a `const fn`: `char::is_control` is only const from 1.97 and the MSRV is
-// 1.96.
-pub fn is_forbidden_jira_text_char(ch: char) -> bool {
+pub const fn is_forbidden_jira_text_char(ch: char) -> bool {
     ch == '\'' || ch.is_control()
 }
 

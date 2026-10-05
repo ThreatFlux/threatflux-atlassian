@@ -256,6 +256,6 @@ mod tests {
         let mut joined = String::from("bot@example.com:s3cr3t");
         zeroize_string(&mut joined);
 
-        assert!(joined.is_empty());
+        assert_eq!(joined, "");
     }
 }

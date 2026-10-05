@@ -1,7 +1,7 @@
 # ThreatFlux Atlassian Dockerfile
 # Multi-stage build for the `tflux-atlassian` CLI.
 
-FROM rust:1.97.1-bookworm@sha256:14bc9c5966e7b3a385794b3d5389a8765668342025fbcc7b2e3d2866ac4bd8c3 AS rust-base
+FROM rust:1.99.0-bookworm@sha256:59037199c44290f2befcdd58dcc540164763fc296950255aaefeef096a1866b0 AS rust-base
 
 ARG VERSION=0.0.0
 ARG BUILD_DATE=unknown
@@ -22,6 +22,9 @@ RUN apt-get update && apt-get install -y \
 
 FROM rust-base AS builder
 
+ARG CARGO_BUILD_JOBS=2
+ENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}
+
 ARG BINARY_NAME
 ARG BINARY_PACKAGE
 ARG SBOM_MANIFEST_PATH
@@ -32,18 +35,19 @@ WORKDIR /build
 
 COPY --chown=builder:builder . .
 
-RUN cargo build --release -p "${BINARY_PACKAGE}" --bin "${BINARY_NAME}" --all-features
+RUN cargo build --locked --release -p "${BINARY_PACKAGE}" --bin "${BINARY_NAME}" --all-features
 
-RUN cargo install cargo-cyclonedx --locked --version 0.5.8 && \
+RUN cargo install cargo-cyclonedx --locked --version 0.5.9 && \
     cargo cyclonedx \
       --manifest-path "${SBOM_MANIFEST_PATH}" \
       --all-features \
       --format json \
       --spec-version 1.5 \
       --override-filename "${BINARY_NAME}-sbom" && \
-    find /build -name "${BINARY_NAME}-sbom.json" -exec cp {} /build/sbom.cdx.json \; -quit
+    find /build -name "${BINARY_NAME}-sbom.json" -exec cp {} /build/sbom.cdx.json \; -quit && \
+    test -s /build/sbom.cdx.json
 
-FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241 AS runtime
+FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS runtime
 
 ARG VERSION=0.0.0
 ARG BUILD_DATE=unknown

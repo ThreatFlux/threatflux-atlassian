@@ -516,7 +516,7 @@ mod tests {
         assert_eq!(fields.created, None);
         assert_eq!(fields.updated, None);
         assert_eq!(fields.resolution_date, None);
-        assert!(fields.labels.is_empty());
+        assert_eq!(fields.labels, [] as [String; 0]);
     }
 
     #[test]
@@ -592,11 +592,11 @@ mod tests {
     fn a_null_list_reads_as_an_empty_one() {
         let fields: SearchIssueFields =
             serde_json::from_value(json!({"labels": null})).expect("deserializes");
-        assert!(fields.labels.is_empty());
+        assert_eq!(fields.labels, [] as [String; 0]);
 
         let page: SearchPage =
             serde_json::from_value(json!({"issues": null})).expect("deserializes");
-        assert!(page.issues.is_empty());
+        assert_eq!(page.issues, [] as [SearchIssue; 0]);
     }
 
     #[test]
@@ -608,7 +608,7 @@ mod tests {
         }))
         .expect("deserializes");
 
-        assert!(page.issues.is_empty());
+        assert_eq!(page.issues, [] as [SearchIssue; 0]);
         assert_eq!(
             page.next_token(),
             Some("more"),

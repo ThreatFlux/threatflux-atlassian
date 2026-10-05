@@ -135,6 +135,6 @@ mod tests {
         sleeper.record(Duration::from_millis(10));
         sleeper.clear();
 
-        assert!(sleeper.recorded().is_empty());
+        assert_eq!(sleeper.recorded(), [] as [std::time::Duration; 0]);
     }
 }

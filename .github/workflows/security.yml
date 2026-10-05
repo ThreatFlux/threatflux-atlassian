@@ -4,18 +4,23 @@
 
 name: Security
 
+permissions:
+  contents: read
+
 on:
   push:
-    branches: [main, dev]
+    branches: [main]
   pull_request:
-    branches: [main, dev]
+    branches: [main]
   schedule:
     - cron: "0 3 * * 1" # Weekly on Monday at 3 AM UTC
   workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_VERSION: 1.97.1
+  CARGO_BUILD_JOBS: 2
+  RUSTUP_TOOLCHAIN: 1.99.0
+  RUST_VERSION: 1.99.0
 
 jobs:
   # ==========================================================================
@@ -31,14 +36,19 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master source pin
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
+      - name: Verify selected compiler
+        run: |
+          rustc --version --verbose
+          cargo --version
+
       - name: Install cargo-audit
-        uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
+        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
         with:
-          tool: cargo-audit
+          tool: cargo-audit@0.22.2
 
       # The ignore list is `.cargo/audit.toml`, not a flag. cargo-deny cannot
       # read that file, so `deny.toml` keeps its own copy and this checker fails
@@ -53,14 +63,16 @@ jobs:
         run: cargo audit
 
       - name: Generate audit report
-        run: cargo audit --json > audit-report.json
-        continue-on-error: true
+        run: |
+          cargo audit --json > audit-report.json
+          python3 -m json.tool audit-report.json > /dev/null
 
       - name: Upload audit report
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: audit-report
           path: audit-report.json
+          if-no-files-found: error
           retention-days: 30
 
   # ==========================================================================
@@ -76,67 +88,37 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master source pin
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
-      - name: Install cargo-deny
-        uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
-        with:
-          tool: cargo-deny
+      - name: Verify selected compiler
+        run: |
+          rustc --version --verbose
+          cargo --version
 
-      # Ahead of the fallback below, so a missing deny.toml is reported as a
-      # missing policy file rather than as a generated one that happens to
-      # suppress nothing.
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
+        with:
+          tool: cargo-deny@0.20.2
+
+      # The checked-in policy is authoritative; never synthesize a fallback.
       - name: Check advisory ignore lists
         run: |
           python3 scripts/check_advisory_ignores.py --self-test
           python3 scripts/check_advisory_ignores.py
 
-      - name: Create deny.toml if missing
-        run: |
-          if [ ! -f deny.toml ]; then
-            cat > deny.toml << 'EOF'
-          [licenses]
-          confidence-threshold = 0.8
-          allow = [
-            "MIT",
-            "Apache-2.0",
-            "Apache-2.0 WITH LLVM-exception",
-            "BSD-2-Clause",
-            "BSD-3-Clause",
-            "ISC",
-            "Unicode-DFS-2016",
-            "CC0-1.0",
-            "Zlib",
-            "Unicode-3.0",
-            "MPL-2.0",
-          ]
-          deny = [
-            "GPL-2.0",
-            "GPL-3.0",
-            "AGPL-3.0",
-          ]
-
-          [sources]
-          unknown-registry = "warn"
-          unknown-git = "warn"
-
-          [advisories]
-          db-path = "~/.cargo/advisory-db"
-          db-urls = ["https://github.com/rustsec/advisory-db"]
-          yanked = "warn"
-          EOF
-          fi
+      - name: Require dependency policy
+        run: test -s deny.toml
 
       - name: Check licenses
-        run: cargo deny check licenses
+        run: cargo deny --locked --workspace --all-features check licenses
 
       - name: Check advisories
-        run: cargo deny check advisories
+        run: cargo deny --locked --workspace --all-features check advisories
 
-      - name: Check bans
-        run: cargo deny check bans
+      - name: Check bans (informational findings)
+        run: cargo deny --locked --workspace --all-features check bans
         continue-on-error: true
 
   # ==========================================================================
@@ -152,14 +134,19 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master source pin
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
+      - name: Verify selected compiler
+        run: |
+          rustc --version --verbose
+          cargo --version
+
       - name: Install cargo-cyclonedx
-        uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2.85.10
+        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
         with:
-          tool: cargo-cyclonedx@0.5.8
+          tool: cargo-cyclonedx@0.5.9
 
       - name: Generate SBOM
         run: make sbom
@@ -169,6 +156,7 @@ jobs:
         with:
           name: sbom
           path: sbom/*.json
+          if-no-files-found: error
           retention-days: 30
 
   # ==========================================================================
@@ -187,15 +175,16 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: TruffleHog Scan
-        uses: trufflesecurity/trufflehog@6f3c981e7b77f235fd2702dd74af25fc4b72bf11 # v3.96.0
+      - name: TruffleHog Scan (informational findings)
+        uses: trufflesecurity/trufflehog@4dd8831c5f12599465d4d45c3c447b4018a34c85 # v3.97.9
         with:
+          version: 3.97.9
           extra_args: --only-verified
         continue-on-error: true
 
       - name: Install Gitleaks
         env:
-          GITLEAKS_VERSION: "8.30.0"
+          GITLEAKS_VERSION: "8.30.1"
         run: |
           set -euo pipefail
           archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
@@ -217,7 +206,7 @@ jobs:
             --report-path gitleaks.sarif
 
       - name: Upload Gitleaks results
-        uses: github/codeql-action/upload-sarif@0c0c5dc2f136b98cb0537075ccfa21f94cd9a63e # codeql-bundle-v2.24.3
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           sarif_file: gitleaks.sarif
         if: always() && hashFiles('gitleaks.sarif') != ''
@@ -235,17 +224,40 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master source pin
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
-      - name: Install cargo-geiger
-        run: cargo install cargo-geiger
-        continue-on-error: true
+      - name: Verify selected compiler
+        run: |
+          rustc --version --verbose
+          cargo --version
 
-      - name: Check unsafe code
-        run: cargo geiger --all-features || true
-        continue-on-error: true
+      - name: Install cargo-geiger
+        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
+        with:
+          tool: cargo-geiger@0.13.0
+
+      - name: Collect unsafe code inventory (informational findings)
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target/geiger
+        run: |
+          set -euo pipefail
+          mkdir -p geiger-reports
+          for package in threatflux-atlassian-sdk threatflux-atlassian-cli threatflux-atlassian-action threatflux-atlassian-testkit; do
+            (cd "crates/$package" && cargo geiger --locked --all-features --package "$package" --output-format Json) \
+              > "geiger-reports/$package.json" 2> "geiger-reports/$package.stderr"
+            python3 scripts/check_geiger_report.py "geiger-reports/$package.json" "$package"
+          done
+
+      - name: Retain unsafe code inventory and diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: geiger-inventory
+          path: geiger-reports
+          if-no-files-found: error
+          retention-days: 5
 
   # ==========================================================================
   # OSSF Scorecard
@@ -279,7 +291,7 @@ jobs:
   security-success:
     name: Security Success
     runs-on: ubuntu-latest
-    needs: [audit, deny, supply-chain, secrets]
+    needs: [audit, deny, supply-chain, secrets, unsafe-check]
     if: always()
     steps:
       - name: Check security jobs
@@ -287,7 +299,8 @@ jobs:
           if [[ "${{ needs.audit.result }}" != "success" || \
                 "${{ needs.deny.result }}" != "success" || \
                 "${{ needs.supply-chain.result }}" != "success" || \
-                "${{ needs.secrets.result }}" != "success" ]]; then
+                "${{ needs.secrets.result }}" != "success" || \
+                "${{ needs.unsafe-check.result }}" != "success" ]]; then
             echo "Security checks failed"
             exit 1
           fi
