@@ -16,6 +16,12 @@ on:
     - cron: "0 3 * * 1" # Weekly on Monday at 3 AM UTC
   workflow_dispatch:
 
+# Superseded pull request runs are cancelled. Other events are grouped per
+# commit, so a main-branch run that gates auto-release is never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   CARGO_TERM_COLOR: always
   CARGO_BUILD_JOBS: 2
@@ -295,12 +301,18 @@ jobs:
     if: always()
     steps:
       - name: Check security jobs
+        env:
+          AUDIT_RESULT: ${{ needs.audit.result }}
+          DENY_RESULT: ${{ needs.deny.result }}
+          SUPPLY_CHAIN_RESULT: ${{ needs.supply-chain.result }}
+          SECRETS_RESULT: ${{ needs.secrets.result }}
+          UNSAFE_CHECK_RESULT: ${{ needs.unsafe-check.result }}
         run: |
-          if [[ "${{ needs.audit.result }}" != "success" || \
-                "${{ needs.deny.result }}" != "success" || \
-                "${{ needs.supply-chain.result }}" != "success" || \
-                "${{ needs.secrets.result }}" != "success" || \
-                "${{ needs.unsafe-check.result }}" != "success" ]]; then
+          if [[ "${AUDIT_RESULT}" != "success" || \
+                "${DENY_RESULT}" != "success" || \
+                "${SUPPLY_CHAIN_RESULT}" != "success" || \
+                "${SECRETS_RESULT}" != "success" || \
+                "${UNSAFE_CHECK_RESULT}" != "success" ]]; then
             echo "Security checks failed"
             exit 1
           fi

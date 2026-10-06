@@ -28,6 +28,13 @@ on:
     - cron: "0 4 * * 1" # Weekly on Monday at 4 AM UTC
   workflow_dispatch:
 
+# Superseded pull request runs are cancelled. Publishing runs (main, tags,
+# schedule, dispatch) queue per ref instead, so an older build can never push
+# its tags after a newer one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   REGISTRY: ghcr.io
   DOCKER_BUILDKIT: 1
@@ -86,6 +93,7 @@ jobs:
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           version: v0.37.2
+          cache-binary: false
           driver-opts: image=moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
 
       - name: Log in to GitHub Container Registry
@@ -139,8 +147,11 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Release (version tag) images are built from scratch: they never read
+          # or write the shared GitHub Actions layer cache, so a poisoned cache
+          # entry cannot reach a published release image.
+          cache-from: ${{ !startsWith(github.ref, 'refs/tags/') && 'type=gha' || '' }}
+          cache-to: ${{ !startsWith(github.ref, 'refs/tags/') && 'type=gha,mode=max' || '' }}
           build-args: |
             VERSION=${{ github.ref_name }}
             BUILD_DATE=${{ github.event.repository.updated_at }}
@@ -171,6 +182,7 @@ jobs:
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           version: v0.37.2
+          cache-binary: false
           driver-opts: image=moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
 
       - name: Build Action image
@@ -232,7 +244,10 @@ jobs:
 
       - name: Pull image
         if: github.event_name != 'pull_request'
-        run: docker pull ${{ env.REGISTRY }}/${{ needs.build.outputs.image_name }}:${{ steps.sha.outputs.short }}
+        env:
+          IMAGE_NAME: ${{ needs.build.outputs.image_name }}
+          SHORT_SHA: ${{ steps.sha.outputs.short }}
+        run: docker pull "${REGISTRY}/${IMAGE_NAME}:${SHORT_SHA}"
 
       - name: Run Trivy scanner (informational findings)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -301,9 +316,11 @@ jobs:
       - name: Sign container image
         run: |
           cosign sign --yes \
-            ${{ env.REGISTRY }}/${{ needs.build.outputs.image_name }}@${{ needs.build.outputs.digest }}
+            "${REGISTRY}/${IMAGE_NAME}@${IMAGE_DIGEST}"
         env:
           COSIGN_EXPERIMENTAL: 1
+          IMAGE_NAME: ${{ needs.build.outputs.image_name }}
+          IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
 
   # ==========================================================================
   # Generate SBOM
@@ -350,10 +367,14 @@ jobs:
     if: always()
     steps:
       - name: Check Docker jobs
+        env:
+          BUILD_RESULT: ${{ needs.build.result }}
+          ACTION_IMAGE_RESULT: ${{ needs.action-image.result }}
+          SCAN_RESULT: ${{ needs.scan.result }}
         run: |
-          if [[ "${{ needs.build.result }}" != "success" || \
-                "${{ needs.action-image.result }}" != "success" || \
-                "${{ needs.scan.result }}" != "success" ]]; then
+          if [[ "${BUILD_RESULT}" != "success" || \
+                "${ACTION_IMAGE_RESULT}" != "success" || \
+                "${SCAN_RESULT}" != "success" ]]; then
             echo "Docker build or scan failed"
             exit 1
           fi
