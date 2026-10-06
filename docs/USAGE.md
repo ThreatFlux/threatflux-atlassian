@@ -168,10 +168,12 @@ make ci
 - The container image runs on distroless Debian 13 (`gcr.io/distroless/cc-debian13:nonroot`) as uid 65532, with no
   shell or package manager. Its entrypoint is `tini`, so pass the CLI as the command, for example
   `docker run --rm ghcr.io/threatflux/threatflux-atlassian tflux-atlassian --help` (`app` is the same binary).
-- Release publishing verifies the SDK first, publishes it, waits for crates.io index propagation, then verifies and
-  publishes the CLI.
-- GitHub Actions publishing should use a shared repo/org `CRATES_IO_TOKEN`; `CARGO_REGISTRY_TOKEN` remains supported as
-  a compatibility fallback.
+- Release publishing verifies both crates with one multi-package `cargo publish --dry-run`, publishes the SDK, waits
+  for crates.io index propagation, then publishes the CLI. A version that already exists on crates.io is skipped, and
+  a real release whose manifest version differs from the release version fails instead of publishing.
+- Publishing uses [crates.io trusted publishing](https://crates.io/docs/trusted-publishing): the `release.yml` publish
+  job runs in the `crates-io` environment and exchanges its GitHub OIDC identity for a short-lived token through
+  `rust-lang/crates-io-auth-action`. No crates.io API token is stored in GitHub, and dry runs never request one.
 
 ## GitHub Action Usage
 

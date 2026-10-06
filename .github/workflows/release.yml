@@ -1,6 +1,6 @@
 # ThreatFlux Release Workflow
 # Automated release with multi-platform builds
-# Version: 1.1.5
+# Version: 1.2.0
 
 name: Release
 
@@ -379,6 +379,18 @@ jobs:
     if: >-
       (github.event_name == 'workflow_dispatch' && inputs.dry_run) ||
       !contains(needs.prepare.outputs.version, '-')
+    # Both crates publish through crates.io trusted publishing, which is bound
+    # to this repository, release.yml and the crates-io environment, so no
+    # registry token is stored in GitHub. A dry run runs without an environment
+    # (an empty name records no deployment) and never requests a token; one it
+    # requested would not match the trusted publisher and crates.io would
+    # refuse it.
+    environment:
+      name: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) && 'crates-io' || '' }}
+      url: https://crates.io/crates/threatflux-atlassian-cli
+    permissions:
+      contents: read
+      id-token: write # Exchanged by crates-io-auth-action for a short-lived crates.io token.
     steps:
       # Install and verify trusted tools before checking out a custom release ref.
       - name: Install Rust
@@ -391,22 +403,41 @@ jobs:
           rustc --version --verbose
           cargo --version
 
-      - name: Check crates.io token
-        id: check_token
-        if: env.DRY_RUN != 'true'
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.release_revision }}
+          persist-credentials: false
+
+      # cargo packages the manifest version. Auto-release bumps the manifests in
+      # its release PR before tagging, so a real release must find its version
+      # in the source: publishing anything else would upload a version the
+      # release does not name. A rehearsal ahead of that bump reports the
+      # version it actually verified instead of claiming the requested one.
+      - name: Check package versions
         env:
-          CARGO_PUBLISH_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          if [ -n "${CARGO_PUBLISH_TOKEN}" ]; then
-            echo "has_token=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_token=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping crates.io publish - CARGO_REGISTRY_TOKEN / CRATES_IO_TOKEN not configured"
-          fi
+          set -euo pipefail
+          cargo metadata --locked --no-deps --format-version 1 > "${RUNNER_TEMP}/cargo-metadata.json"
+          mismatch=false
+          for package in "${SDK_PACKAGE}" "${CLI_PACKAGE}"; do
+            manifest_version="$(python3 -c 'import json, sys; print(next(p["version"] for p in json.load(open(sys.argv[1]))["packages"] if p["name"] == sys.argv[2]))' "${RUNNER_TEMP}/cargo-metadata.json" "${package}")"
+            if [[ "${manifest_version}" == "${RELEASE_VERSION}" ]]; then
+              echo "${package}: manifest version matches ${RELEASE_VERSION}" | tee -a "$GITHUB_STEP_SUMMARY"
+            elif [[ "${DRY_RUN}" == "true" ]]; then
+              echo "::warning title=Manifest version not bumped::${package} is ${manifest_version} in the source, so this dry run verifies ${manifest_version}, not ${RELEASE_VERSION}"
+              echo "${package}: verified manifest version ${manifest_version}; requested ${RELEASE_VERSION} is not bumped in the source yet" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::error title=Manifest version mismatch::${package} is ${manifest_version} in the release source, not ${RELEASE_VERSION}; refusing to publish a version this release does not name"
+              mismatch=true
+            fi
+          done
+          [[ "${mismatch}" == "false" ]]
 
       - name: Determine publish state
         id: publish_state
-        if: steps.check_token.outputs.has_token == 'true'
+        if: env.DRY_RUN != 'true'
         env:
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
@@ -418,6 +449,7 @@ jobs:
 
           version = os.environ["RELEASE_VERSION"]
           output_path = os.environ["GITHUB_OUTPUT"]
+          user_agent = f"{os.environ['GITHUB_REPOSITORY']} release workflow (https://github.com/{os.environ['GITHUB_REPOSITORY']})"
           crate_outputs = {
               "sdk_published": os.environ["SDK_PACKAGE"],
               "cli_published": os.environ["CLI_PACKAGE"],
@@ -425,9 +457,12 @@ jobs:
 
           with open(output_path, "a", encoding="utf-8") as output:
               for output_name, crate_name in crate_outputs.items():
-                  url = f"https://crates.io/api/v1/crates/{crate_name}"
+                  request = urllib.request.Request(
+                      f"https://crates.io/api/v1/crates/{crate_name}",
+                      headers={"User-Agent": user_agent},
+                  )
                   try:
-                      with urllib.request.urlopen(url, timeout=30) as response:
+                      with urllib.request.urlopen(request, timeout=30) as response:
                           payload = json.load(response)
                   except urllib.error.HTTPError as exc:
                       if exc.code != 404:
@@ -444,70 +479,56 @@ jobs:
                   )
           PY
 
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.prepare.outputs.release_revision }}
-          persist-credentials: false
-
       # One multi-package dry run resolves the CLI's dependency on the SDK from
       # the locally packaged SDK, so it needs no token and no prior SDK upload.
-      # cargo packages the manifest version. Auto-release bumps the manifests in
-      # its release PR before tagging, so a rehearsal ahead of that bump reports
-      # the version it actually verified instead of claiming the requested one.
-      - name: Verify crates.io packages (dry run)
-        if: env.DRY_RUN == 'true'
-        env:
-          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
-        run: |
-          set -euo pipefail
-          cargo metadata --locked --no-deps --format-version 1 > "${RUNNER_TEMP}/cargo-metadata.json"
-          for package in "${SDK_PACKAGE}" "${CLI_PACKAGE}"; do
-            manifest_version="$(python3 -c 'import json, sys; print(next(p["version"] for p in json.load(open(sys.argv[1]))["packages"] if p["name"] == sys.argv[2]))' "${RUNNER_TEMP}/cargo-metadata.json" "${package}")"
-            if [[ "${manifest_version}" == "${RELEASE_VERSION}" ]]; then
-              echo "${package}: manifest version matches ${RELEASE_VERSION}" | tee -a "$GITHUB_STEP_SUMMARY"
-            else
-              echo "::warning title=Manifest version not bumped::${package} is ${manifest_version} in the source, so this dry run verifies ${manifest_version}, not ${RELEASE_VERSION}"
-              echo "${package}: verified manifest version ${manifest_version}; requested ${RELEASE_VERSION} is not bumped in the source yet" >> "$GITHUB_STEP_SUMMARY"
-            fi
-          done
-          cargo publish --locked --dry-run -p "${SDK_PACKAGE}" -p "${CLI_PACKAGE}"
+      # A real release runs it too, before any token is minted, so a CLI that
+      # cannot be packaged fails the run before the SDK is uploaded.
+      - name: Verify crates.io packages
+        if: steps.publish_state.outputs.sdk_published != 'true' || steps.publish_state.outputs.cli_published != 'true'
+        run: cargo publish --locked --dry-run -p "${SDK_PACKAGE}" -p "${CLI_PACKAGE}"
 
-      - name: Verify SDK publish
-        if: steps.check_token.outputs.has_token == 'true' && steps.publish_state.outputs.sdk_published != 'true'
-        run: cargo publish -p "${SDK_PACKAGE}" --locked --dry-run
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}
+      # Exchanges this job's GitHub OIDC identity for a crates.io token that
+      # expires after 30 minutes and is revoked when the job ends. Any failure
+      # here fails the release.
+      - name: Authenticate with crates.io
+        id: crates-io
+        if: >-
+          env.DRY_RUN != 'true' &&
+          (steps.publish_state.outputs.sdk_published != 'true' || steps.publish_state.outputs.cli_published != 'true')
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
 
       - name: Publish SDK to crates.io
-        if: steps.check_token.outputs.has_token == 'true' && steps.publish_state.outputs.sdk_published != 'true'
+        if: env.DRY_RUN != 'true' && steps.publish_state.outputs.sdk_published != 'true'
         run: cargo publish -p "${SDK_PACKAGE}" --locked
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates-io.outputs.token }}
 
       - name: Wait for SDK version on crates.io
-        if: steps.check_token.outputs.has_token == 'true' && steps.publish_state.outputs.cli_published != 'true'
+        if: env.DRY_RUN != 'true' && steps.publish_state.outputs.cli_published != 'true'
         env:
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
 
           # The CLI depends on the freshly published SDK version. Wait for the
-          # crates.io index to surface that version before verifying/publishing
-          # the CLI crate.
+          # crates.io index to surface that version before publishing the CLI
+          # crate.
           for attempt in $(seq 1 30); do
             if python3 - "${SDK_PACKAGE}" "$RELEASE_VERSION" <<'PY'
           import json
+          import os
           import sys
           import urllib.request
 
           crate_name = sys.argv[1]
           version = sys.argv[2]
+          repository = os.environ["GITHUB_REPOSITORY"]
 
-          with urllib.request.urlopen(
+          request = urllib.request.Request(
               f"https://crates.io/api/v1/crates/{crate_name}",
-              timeout=30,
-          ) as response:
+              headers={"User-Agent": f"{repository} release workflow (https://github.com/{repository})"},
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
               payload = json.load(response)
 
           versions = {item["num"] for item in payload.get("versions", [])}
@@ -525,20 +546,14 @@ jobs:
           echo "Timed out waiting for ${SDK_PACKAGE} ${RELEASE_VERSION} to reach crates.io"
           exit 1
 
-      - name: Verify CLI publish
-        if: steps.check_token.outputs.has_token == 'true' && steps.publish_state.outputs.cli_published != 'true'
-        run: cargo publish -p "${CLI_PACKAGE}" --locked --dry-run
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}
-
       - name: Publish CLI to crates.io
-        if: steps.check_token.outputs.has_token == 'true' && steps.publish_state.outputs.cli_published != 'true'
+        if: env.DRY_RUN != 'true' && steps.publish_state.outputs.cli_published != 'true'
         run: cargo publish -p "${CLI_PACKAGE}" --locked
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates-io.outputs.token }}
 
       - name: Report publish reuse
-        if: steps.check_token.outputs.has_token == 'true' && steps.publish_state.outputs.sdk_published == 'true' && steps.publish_state.outputs.cli_published == 'true'
+        if: env.DRY_RUN != 'true' && steps.publish_state.outputs.sdk_published == 'true' && steps.publish_state.outputs.cli_published == 'true'
         env:
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
         run: echo "All crates for v${RELEASE_VERSION} already exist on crates.io; skipping publish"
