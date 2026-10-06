@@ -1,11 +1,15 @@
 name: Auto Release
 
+# A dry run gets its own group so it can never cancel a real release run.
 concurrency:
-  group: auto-release-${{ github.event.workflow_run.head_branch || github.ref_name || 'main' }}
+  group: auto-release-${{ github.event.workflow_run.head_branch || github.ref_name || 'main' }}${{ inputs.dry_run && '-dry-run' || '' }}
   cancel-in-progress: true
 
 on:
-  workflow_run:
+  # workflow_run is required to release only after CI and Security pass on main.
+  # The reusable workflow gates on a successful run from this repository (never
+  # a fork) and executes no code from the triggering checkout.
+  workflow_run: # zizmor: ignore[dangerous-triggers]
     workflows: [CI, Security]
     types: [completed]
     branches: [main]
@@ -21,6 +25,11 @@ on:
           - patch
           - minor
           - major
+      dry_run:
+        description: Analyze and report without creating any commit, tag, release or PR
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   actions: read
@@ -36,6 +45,7 @@ jobs:
     uses: ThreatFlux/github_actions/.github/workflows/reusable-auto-release.yml@7a5f08885a77520db023882c8de17d9e6580b7ae # v0.7.5
     with:
       bump: ${{ github.event.inputs.version_bump || 'auto' }}
+      dry-run: ${{ inputs.dry_run == true }}
       # main is protected with enforce_admins, so the version bump cannot be
       # fast-forwarded onto it. The release lands through an automation PR.
       create-pr: true

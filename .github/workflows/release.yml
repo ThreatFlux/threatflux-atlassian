@@ -26,6 +26,17 @@ on:
         required: false
         type: boolean
         default: false
+      dry_run:
+        description: "Build, package, SBOM and verify crates and the image without tagging, releasing, uploading or publishing"
+        required: false
+        type: boolean
+        default: false
+
+# Never cancel a release in flight. Runs for the same version queue instead,
+# and a dry run never waits on (or delays) a real release of that version.
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '-dry-run' || '' }}
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -36,6 +47,8 @@ env:
   BINARY_NAME: tflux-atlassian
   CLI_PACKAGE: threatflux-atlassian-cli
   SDK_PACKAGE: threatflux-atlassian-sdk
+  # Only workflow_dispatch can set this; tag pushes always perform a real release.
+  DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
 
 jobs:
   # ==========================================================================
@@ -68,40 +81,53 @@ jobs:
           VALIDATED_RELEASE_REVISION: ${{ steps.revision.outputs.value }}
         run: git checkout --detach "$VALIDATED_RELEASE_REVISION" --
 
-      - name: Determine version
+      # The version is validated before it reaches GITHUB_OUTPUT, so later steps
+      # and jobs only ever see a well-formed value.
+      - name: Determine and validate version
         id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            VERSION="${{ github.event.inputs.version }}"
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            VERSION="${INPUT_VERSION}"
           else
-            VERSION=${GITHUB_REF#refs/tags/v}
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          fi
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$ ]]; then
+            echo "Invalid version format; expected MAJOR.MINOR.PATCH with an optional -suffix"
+            exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Validate version format
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$ ]]; then
-            echo "Invalid version format: $VERSION"
-            exit 1
-          fi
-
       - name: Generate release notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
           echo "## Release v$VERSION" > release_notes.md
           echo "" >> release_notes.md
           if [ -f CHANGELOG.md ]; then
             awk "/## \[$VERSION\]/,/## \[/" CHANGELOG.md | sed '1d;$d' >> release_notes.md 2>/dev/null || echo "See CHANGELOG.md for details" >> release_notes.md
           fi
 
+      - name: Report dry run
+        if: env.DRY_RUN == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          VALIDATED_RELEASE_REVISION: ${{ steps.revision.outputs.value }}
+        run: |
+          echo "Dry run: building ${VALIDATED_RELEASE_REVISION} as v${VERSION} without creating or checking a tag or release"
+          cat release_notes.md
+
       - name: Create or update GitHub Release
+        if: env.DRY_RUN != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VALIDATED_RELEASE_REVISION: ${{ steps.revision.outputs.value }}
+          VERSION: ${{ steps.version.outputs.version }}
+          INPUT_PRERELEASE: ${{ inputs.prerelease && 'true' || 'false' }}
         run: |
           set -euo pipefail
-          VERSION="${{ steps.version.outputs.version }}"
           TAG="v${VERSION}"
           TITLE="Release v${VERSION}"
           IS_PRERELEASE="false"
@@ -116,7 +142,7 @@ jobs:
             exit 1
           fi
 
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.prerelease && 'true' || 'false' }}" == "true" ]]; then
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${INPUT_PRERELEASE}" == "true" ]]; then
             IS_PRERELEASE="true"
           fi
 
@@ -183,6 +209,9 @@ jobs:
             target: x86_64-pc-windows-msvc
             artifact: windows-amd64
     runs-on: ${{ matrix.os }}
+    env:
+      TARGET: ${{ matrix.target }}
+      ARTIFACT: ${{ matrix.artifact }}
     steps:
       # Install and verify trusted tools before checking out a custom release ref.
       - name: Install Rust
@@ -216,30 +245,30 @@ jobs:
 
       - name: Build (cross)
         if: matrix.use_cross
-        run: cross build --locked --release --target ${{ matrix.target }} -p ${{ env.CLI_PACKAGE }} --bin ${{ env.BINARY_NAME }} --all-features
+        run: cross build --locked --release --target "${TARGET}" -p "${CLI_PACKAGE}" --bin "${BINARY_NAME}" --all-features
 
       - name: Build (native)
         if: "!matrix.use_cross"
         shell: bash
-        run: cargo build --locked --release --target ${{ matrix.target }} -p ${{ env.CLI_PACKAGE }} --bin ${{ env.BINARY_NAME }} --all-features
+        run: cargo build --locked --release --target "${TARGET}" -p "${CLI_PACKAGE}" --bin "${BINARY_NAME}" --all-features
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
         run: |
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/${{ env.BINARY_NAME }} dist/
+          cp "target/${TARGET}/release/${BINARY_NAME}" dist/
           cd dist
-          tar czf ../${{ env.BINARY_NAME }}-${{ matrix.artifact }}.tar.gz ./*
+          tar czf "../${BINARY_NAME}-${ARTIFACT}.tar.gz" ./*
           cd ..
-          shasum -a 256 ${{ env.BINARY_NAME }}-${{ matrix.artifact }}.tar.gz > ${{ env.BINARY_NAME }}-${{ matrix.artifact }}.tar.gz.sha256
+          shasum -a 256 "${BINARY_NAME}-${ARTIFACT}.tar.gz" > "${BINARY_NAME}-${ARTIFACT}.tar.gz.sha256"
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           mkdir dist
-          Copy-Item "target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}.exe" dist/
-          $archive = "${{ env.BINARY_NAME }}-${{ matrix.artifact }}.zip"
+          Copy-Item "target/${env:TARGET}/release/${env:BINARY_NAME}.exe" dist/
+          $archive = "${env:BINARY_NAME}-${env:ARTIFACT}.zip"
           Compress-Archive -Path dist/* -DestinationPath $archive
           $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
           "$hash  $archive" | Out-File -Encoding ascii "$archive.sha256"
@@ -293,9 +322,10 @@ jobs:
           persist-credentials: false
 
       - name: Generate SBOM files
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           make sbom
-          VERSION="${{ needs.prepare.outputs.version }}"
           mv sbom/threatflux-atlassian-sdk-sbom.json "sbom/threatflux-atlassian-sdk-v${VERSION}.cdx.json"
           mv sbom/threatflux-atlassian-cli-sbom.json "sbom/threatflux-atlassian-cli-v${VERSION}.cdx.json"
 
@@ -313,6 +343,7 @@ jobs:
   upload-assets:
     name: Upload Release Assets
     needs: [prepare, build, sbom]
+    if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -328,12 +359,13 @@ jobs:
           set -euo pipefail
 
           while IFS= read -r -d '' file; do
-            gh release upload "v${{ needs.prepare.outputs.version }}" "$file" \
+            gh release upload "v${VERSION}" "$file" \
               --repo "$GITHUB_REPOSITORY" \
               --clobber
           done < <(find artifacts -type f -print0)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.prepare.outputs.version }}
 
   # ==========================================================================
   # Publish to crates.io
@@ -342,7 +374,11 @@ jobs:
     name: Publish to crates.io
     needs: [prepare, build]
     runs-on: ubuntu-latest
-    if: "!contains(needs.prepare.outputs.version, '-')"
+    # Real publishes skip pre-release versions (a -suffix). A dry run always
+    # verifies both packages with `cargo publish --dry-run` and never uploads.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.dry_run) ||
+      !contains(needs.prepare.outputs.version, '-')
     steps:
       # Install and verify trusted tools before checking out a custom release ref.
       - name: Install Rust
@@ -357,6 +393,7 @@ jobs:
 
       - name: Check crates.io token
         id: check_token
+        if: env.DRY_RUN != 'true'
         env:
           CARGO_PUBLISH_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}
         run: |
@@ -413,15 +450,38 @@ jobs:
           ref: ${{ needs.prepare.outputs.release_revision }}
           persist-credentials: false
 
+      # One multi-package dry run resolves the CLI's dependency on the SDK from
+      # the locally packaged SDK, so it needs no token and no prior SDK upload.
+      # cargo packages the manifest version. Auto-release bumps the manifests in
+      # its release PR before tagging, so a rehearsal ahead of that bump reports
+      # the version it actually verified instead of claiming the requested one.
+      - name: Verify crates.io packages (dry run)
+        if: env.DRY_RUN == 'true'
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          cargo metadata --locked --no-deps --format-version 1 > "${RUNNER_TEMP}/cargo-metadata.json"
+          for package in "${SDK_PACKAGE}" "${CLI_PACKAGE}"; do
+            manifest_version="$(python3 -c 'import json, sys; print(next(p["version"] for p in json.load(open(sys.argv[1]))["packages"] if p["name"] == sys.argv[2]))' "${RUNNER_TEMP}/cargo-metadata.json" "${package}")"
+            if [[ "${manifest_version}" == "${RELEASE_VERSION}" ]]; then
+              echo "${package}: manifest version matches ${RELEASE_VERSION}" | tee -a "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::warning title=Manifest version not bumped::${package} is ${manifest_version} in the source, so this dry run verifies ${manifest_version}, not ${RELEASE_VERSION}"
+              echo "${package}: verified manifest version ${manifest_version}; requested ${RELEASE_VERSION} is not bumped in the source yet" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          cargo publish --locked --dry-run -p "${SDK_PACKAGE}" -p "${CLI_PACKAGE}"
+
       - name: Verify SDK publish
         if: steps.check_token.outputs.has_token == 'true' && steps.publish_state.outputs.sdk_published != 'true'
-        run: cargo publish -p ${{ env.SDK_PACKAGE }} --locked --dry-run
+        run: cargo publish -p "${SDK_PACKAGE}" --locked --dry-run
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}
 
       - name: Publish SDK to crates.io
         if: steps.check_token.outputs.has_token == 'true' && steps.publish_state.outputs.sdk_published != 'true'
-        run: cargo publish -p ${{ env.SDK_PACKAGE }} --locked
+        run: cargo publish -p "${SDK_PACKAGE}" --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}
 
@@ -436,7 +496,7 @@ jobs:
           # crates.io index to surface that version before verifying/publishing
           # the CLI crate.
           for attempt in $(seq 1 30); do
-            if python3 - "${{ env.SDK_PACKAGE }}" "$RELEASE_VERSION" <<'PY'
+            if python3 - "${SDK_PACKAGE}" "$RELEASE_VERSION" <<'PY'
           import json
           import sys
           import urllib.request
@@ -454,33 +514,79 @@ jobs:
           raise SystemExit(0 if version in versions else 1)
           PY
             then
-              echo "${{ env.SDK_PACKAGE }} ${RELEASE_VERSION} is available on crates.io"
+              echo "${SDK_PACKAGE} ${RELEASE_VERSION} is available on crates.io"
               exit 0
             fi
 
-            echo "Attempt ${attempt}/30: waiting for ${{ env.SDK_PACKAGE }} ${RELEASE_VERSION} to reach crates.io"
+            echo "Attempt ${attempt}/30: waiting for ${SDK_PACKAGE} ${RELEASE_VERSION} to reach crates.io"
             sleep 20
           done
 
-          echo "Timed out waiting for ${{ env.SDK_PACKAGE }} ${RELEASE_VERSION} to reach crates.io"
+          echo "Timed out waiting for ${SDK_PACKAGE} ${RELEASE_VERSION} to reach crates.io"
           exit 1
 
       - name: Verify CLI publish
         if: steps.check_token.outputs.has_token == 'true' && steps.publish_state.outputs.cli_published != 'true'
-        run: cargo publish -p ${{ env.CLI_PACKAGE }} --locked --dry-run
+        run: cargo publish -p "${CLI_PACKAGE}" --locked --dry-run
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}
 
       - name: Publish CLI to crates.io
         if: steps.check_token.outputs.has_token == 'true' && steps.publish_state.outputs.cli_published != 'true'
-        run: |
-          cargo publish -p ${{ env.CLI_PACKAGE }} --locked
+        run: cargo publish -p "${CLI_PACKAGE}" --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}
 
       - name: Report publish reuse
         if: steps.check_token.outputs.has_token == 'true' && steps.publish_state.outputs.sdk_published == 'true' && steps.publish_state.outputs.cli_published == 'true'
-        run: echo "All crates for v${{ needs.prepare.outputs.version }} already exist on crates.io; skipping publish"
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: echo "All crates for v${RELEASE_VERSION} already exist on crates.io; skipping publish"
+
+  # ==========================================================================
+  # Docker Build (dry run only)
+  # ==========================================================================
+  # Real releases build and push images from docker.yml on the version tag.
+  # A dry run rehearses that multi-platform build from the validated revision
+  # without logging in to a registry, pushing, or reading/writing a build cache.
+  docker:
+    name: Docker Build (dry run)
+    needs: prepare
+    if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.release_revision }}
+          persist-credentials: false
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          image: tonistiigi/binfmt:qemu-v10.2.3@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: v0.37.2
+          cache-binary: false
+          driver-opts: image=moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+
+      - name: Build image without pushing
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
+          build-args: |
+            VERSION=v${{ needs.prepare.outputs.version }}
+            BUILD_DATE=${{ github.event.repository.updated_at }}
+            VCS_REF=${{ needs.prepare.outputs.release_revision }}
+            BINARY_NAME=${{ env.BINARY_NAME }}
+            BINARY_PACKAGE=${{ env.CLI_PACKAGE }}
+            SBOM_MANIFEST_PATH=crates/${{ env.CLI_PACKAGE }}/Cargo.toml
 
   # ==========================================================================
   # Release Success Gate
@@ -488,22 +594,47 @@ jobs:
   release-success:
     name: Release Success
     runs-on: ubuntu-latest
-    needs: [prepare, build, sbom, upload-assets, publish]
+    needs: [prepare, build, sbom, upload-assets, publish, docker]
     if: always()
     steps:
       - name: Check release status
+        env:
+          PREPARE_RESULT: ${{ needs.prepare.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          SBOM_RESULT: ${{ needs.sbom.result }}
+          UPLOAD_RESULT: ${{ needs.upload-assets.result }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
+          DOCKER_RESULT: ${{ needs.docker.result }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          if [[ "${{ needs.prepare.result }}" != "success" || \
-                "${{ needs.build.result }}" != "success" || \
-                "${{ needs.sbom.result }}" != "success" || \
-                "${{ needs.upload-assets.result }}" != "success" ]]; then
+          if [[ "${PREPARE_RESULT}" != "success" || \
+                "${BUILD_RESULT}" != "success" || \
+                "${SBOM_RESULT}" != "success" ]]; then
             echo "Release pipeline failed"
             exit 1
           fi
-          if [[ "${{ needs.publish.result }}" != "success" && \
-                "${{ needs.publish.result }}" != "skipped" ]]; then
+          if [[ "${DRY_RUN}" == "true" ]]; then
+            # A dry run must verify packaging and the image, and must not upload.
+            if [[ "${PUBLISH_RESULT}" != "success" || "${DOCKER_RESULT}" != "success" ]]; then
+              echo "Release dry run verification failed"
+              exit 1
+            fi
+            if [[ "${UPLOAD_RESULT}" != "skipped" ]]; then
+              echo "Release dry run unexpectedly ran the asset upload job"
+              exit 1
+            fi
+            echo "Release dry run completed successfully; nothing was tagged, released or published"
+            echo "Version: ${RELEASE_VERSION}"
+            exit 0
+          fi
+          if [[ "${UPLOAD_RESULT}" != "success" ]]; then
+            echo "Release asset upload failed"
+            exit 1
+          fi
+          if [[ "${PUBLISH_RESULT}" != "success" && \
+                "${PUBLISH_RESULT}" != "skipped" ]]; then
             echo "Crates.io publish failed"
             exit 1
           fi
           echo "Release completed successfully"
-          echo "Version: ${{ needs.prepare.outputs.version }}"
+          echo "Version: ${RELEASE_VERSION}"

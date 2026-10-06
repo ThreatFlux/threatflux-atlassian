@@ -26,6 +26,12 @@ on:
     - cron: "0 0 * * 0" # Weekly on Sunday at midnight UTC
   workflow_dispatch:
 
+# Superseded pull request runs are cancelled. Other events are grouped per
+# commit, so a main-branch run that gates auto-release is never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   CARGO_TERM_COLOR: always
   CARGO_BUILD_JOBS: 2
@@ -428,14 +434,22 @@ jobs:
     if: always()
     steps:
       - name: Check all jobs
+        env:
+          QUICK_CHECK_RESULT: ${{ needs.quick-check.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          MSRV_RESULT: ${{ needs.msrv.result }}
+          FEATURES_RESULT: ${{ needs.features.result }}
+          DOCS_RESULT: ${{ needs.docs.result }}
+          BENCH_RESULT: ${{ needs.bench.result }}
+          COVERAGE_RESULT: ${{ needs.coverage.result }}
         run: |
-          if [[ "${{ needs.quick-check.result }}" != "success" || \
-                "${{ needs.test.result }}" != "success" || \
-                "${{ needs.msrv.result }}" != "success" || \
-                "${{ needs.features.result }}" != "success" || \
-                "${{ needs.docs.result }}" != "success" || \
-                "${{ needs.bench.result }}" != "success" || \
-                "${{ needs.coverage.result }}" != "success" ]]; then
+          if [[ "${QUICK_CHECK_RESULT}" != "success" || \
+                "${TEST_RESULT}" != "success" || \
+                "${MSRV_RESULT}" != "success" || \
+                "${FEATURES_RESULT}" != "success" || \
+                "${DOCS_RESULT}" != "success" || \
+                "${BENCH_RESULT}" != "success" || \
+                "${COVERAGE_RESULT}" != "success" ]]; then
             echo "One or more required jobs failed"
             exit 1
           fi
