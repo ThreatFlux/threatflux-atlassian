@@ -15,6 +15,7 @@
 # Containers run with --network none: none of these checks needs the network.
 set -euo pipefail
 
+# usage: print the command line synopsis to stderr and exit 2.
 usage() {
   echo "usage: $0 cli|action <image-ref> [platform]" >&2
   exit 2
@@ -37,6 +38,8 @@ elif [[ "${platform%/v[0-9]*}" != "${image_platform}" ]]; then
 fi
 echo "Smoke-testing ${kind} image ${image} (${platform})"
 
+# run ARGS...: docker run the image's selected platform with ARGS, removing the
+# container afterwards and with no network.
 run() {
   docker run --rm --network none --platform "${platform}" "$@"
 }
