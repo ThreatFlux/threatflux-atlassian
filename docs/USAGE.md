@@ -165,10 +165,12 @@ make ci
   tagged source.
 - GitHub releases attach CycloneDX SBOMs for the SDK and CLI crates.
 - The container image embeds a CycloneDX SBOM at `/usr/share/doc/threatflux-atlassian/sbom.cdx.json`.
-- Release publishing verifies the SDK first, publishes it, waits for crates.io index propagation, then verifies and
-  publishes the CLI.
-- GitHub Actions publishing should use a shared repo/org `CRATES_IO_TOKEN`; `CARGO_REGISTRY_TOKEN` remains supported as
-  a compatibility fallback.
+- Release publishing verifies both crates with one multi-package `cargo publish --dry-run`, publishes the SDK, waits
+  for crates.io index propagation, then publishes the CLI. A version that already exists on crates.io is skipped, and
+  a real release whose manifest version differs from the release version fails instead of publishing.
+- Publishing uses [crates.io trusted publishing](https://crates.io/docs/trusted-publishing): the `release.yml` publish
+  job runs in the `crates-io` environment and exchanges its GitHub OIDC identity for a short-lived token through
+  `rust-lang/crates-io-auth-action`. No crates.io API token is stored in GitHub, and dry runs never request one.
 
 ## GitHub Action Usage
 
