@@ -28,11 +28,11 @@ on:
     - cron: "0 4 * * 1" # Weekly on Monday at 4 AM UTC
   workflow_dispatch:
 
-# Superseded pull request runs are cancelled. Publishing runs (main, tags,
-# schedule, dispatch) queue per ref instead, so an older build can never push
-# its tags after a newer one.
+# Superseded pull request runs are cancelled. Publishing runs (push, schedule
+# and dispatch) share one queue per ref whatever the event, so an older build
+# can never push the same image tags after a newer one.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:

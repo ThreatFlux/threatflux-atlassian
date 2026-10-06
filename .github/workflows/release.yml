@@ -452,9 +452,26 @@ jobs:
 
       # One multi-package dry run resolves the CLI's dependency on the SDK from
       # the locally packaged SDK, so it needs no token and no prior SDK upload.
+      # cargo packages the manifest version. Auto-release bumps the manifests in
+      # its release PR before tagging, so a rehearsal ahead of that bump reports
+      # the version it actually verified instead of claiming the requested one.
       - name: Verify crates.io packages (dry run)
         if: env.DRY_RUN == 'true'
-        run: cargo publish --locked --dry-run -p "${SDK_PACKAGE}" -p "${CLI_PACKAGE}"
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          cargo metadata --locked --no-deps --format-version 1 > "${RUNNER_TEMP}/cargo-metadata.json"
+          for package in "${SDK_PACKAGE}" "${CLI_PACKAGE}"; do
+            manifest_version="$(python3 -c 'import json, sys; print(next(p["version"] for p in json.load(open(sys.argv[1]))["packages"] if p["name"] == sys.argv[2]))' "${RUNNER_TEMP}/cargo-metadata.json" "${package}")"
+            if [[ "${manifest_version}" == "${RELEASE_VERSION}" ]]; then
+              echo "${package}: manifest version matches ${RELEASE_VERSION}" | tee -a "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::warning title=Manifest version not bumped::${package} is ${manifest_version} in the source, so this dry run verifies ${manifest_version}, not ${RELEASE_VERSION}"
+              echo "${package}: verified manifest version ${manifest_version}; requested ${RELEASE_VERSION} is not bumped in the source yet" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          cargo publish --locked --dry-run -p "${SDK_PACKAGE}" -p "${CLI_PACKAGE}"
 
       - name: Verify SDK publish
         if: steps.check_token.outputs.has_token == 'true' && steps.publish_state.outputs.sdk_published != 'true'
