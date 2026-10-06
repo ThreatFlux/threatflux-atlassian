@@ -603,6 +603,38 @@ jobs:
             BINARY_PACKAGE=${{ env.CLI_PACKAGE }}
             SBOM_MANIFEST_PATH=crates/${{ env.CLI_PACKAGE }}/Cargo.toml
 
+      # A multi-platform result cannot be loaded into the runner's image store,
+      # so each platform is rebuilt from the same builder's layer cache with the
+      # same build arguments, loaded under its own tag and smoke-tested (arm64
+      # under QEMU). A release source from before the smoke test existed is
+      # reported rather than failed.
+      - name: Smoke-test each platform image
+        env:
+          VERSION: v${{ needs.prepare.outputs.version }}
+          BUILD_DATE: ${{ github.event.repository.updated_at }}
+          VCS_REF: ${{ needs.prepare.outputs.release_revision }}
+        run: |
+          set -euo pipefail
+          if [[ ! -f scripts/smoke_test_image.sh ]]; then
+            echo "::warning title=Image smoke test skipped::The release source has no scripts/smoke_test_image.sh"
+            exit 0
+          fi
+          for platform in linux/amd64 linux/arm64; do
+            tag="release-dry-run:${platform//\//-}"
+            docker buildx build \
+              --platform "${platform}" \
+              --load \
+              --tag "${tag}" \
+              --build-arg VERSION="${VERSION}" \
+              --build-arg BUILD_DATE="${BUILD_DATE}" \
+              --build-arg VCS_REF="${VCS_REF}" \
+              --build-arg BINARY_NAME="${BINARY_NAME}" \
+              --build-arg BINARY_PACKAGE="${CLI_PACKAGE}" \
+              --build-arg SBOM_MANIFEST_PATH="crates/${CLI_PACKAGE}/Cargo.toml" \
+              .
+            bash scripts/smoke_test_image.sh cli "${tag}" "${platform}"
+          done
+
   # ==========================================================================
   # Release Success Gate
   # ==========================================================================

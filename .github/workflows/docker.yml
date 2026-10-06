@@ -1,6 +1,6 @@
 # ThreatFlux Docker Workflow
 # Multi-platform Docker builds with security scanning
-# Version: 1.1.2
+# Version: 1.2.0
 
 name: Docker
 
@@ -19,6 +19,7 @@ on:
       - "Dockerfile"
       - "action.Dockerfile"
       - "action.yml"
+      - "scripts/smoke_test_image.sh"
       - "rust-toolchain.toml"
       - ".dockerignore"
       - "Cargo.toml"
@@ -57,6 +58,7 @@ jobs:
       image: ${{ steps.meta.outputs.tags }}
       digest: ${{ steps.build.outputs.digest }}
       image_name: ${{ steps.lowercase.outputs.image_name }}
+      platforms: ${{ steps.platforms.outputs.value }}
 
     steps:
       - name: Checkout
@@ -197,10 +199,8 @@ jobs:
           cache-from: type=gha,scope=action-image
           cache-to: type=gha,scope=action-image,mode=max
 
-      - name: Verify nonroot Action image and help
-        run: |
-          test "$(docker image inspect --format '{{.Config.User}}' threatflux-atlassian-action:smoke)" = app
-          docker run --rm --network none threatflux-atlassian-action:smoke --help
+      - name: Smoke-test Action image
+        run: bash scripts/smoke_test_image.sh action threatflux-atlassian-action:smoke linux/amd64
 
   # ==========================================================================
   # Security Scanning
@@ -280,6 +280,62 @@ jobs:
         with:
           sarif_file: "trivy-results.sarif"
         if: always() && hashFiles('trivy-results.sarif') != ''
+
+      # Every platform the build produced is smoke-tested: pull requests and
+      # branch builds are amd64 only, version tags also publish arm64, which
+      # runs here under QEMU. Published images are pulled by their per-platform
+      # manifest digest, so the platform under test is unambiguous whichever
+      # image store the runner's Docker uses. This runs after the Trivy scan so
+      # its pulls cannot change the image Trivy reads.
+      - name: Set up QEMU
+        if: contains(needs.build.outputs.platforms, 'linux/arm64')
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          image: tonistiigi/binfmt:qemu-v10.2.3@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+          platforms: arm64
+
+      - name: Smoke-test image
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          IMAGE_NAME: ${{ needs.build.outputs.image_name }}
+          SHORT_SHA: ${{ steps.sha.outputs.short }}
+          PLATFORMS: ${{ needs.build.outputs.platforms }}
+        run: |
+          set -euo pipefail
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            bash scripts/smoke_test_image.sh cli "${IMAGE_NAME}:scan" linux/amd64
+            exit 0
+          fi
+          image="${REGISTRY}/${IMAGE_NAME}:${SHORT_SHA}"
+          docker buildx imagetools inspect --raw "${image}" > "${RUNNER_TEMP}/image-index.json"
+          IFS=',' read -ra platforms <<< "${PLATFORMS}"
+          for platform in "${platforms[@]}"; do
+            reference="$(python3 - "${RUNNER_TEMP}/image-index.json" "${platform}" "${REGISTRY}/${IMAGE_NAME}" "${image}" <<'PY'
+          import json
+          import sys
+
+          index_path, platform, repository, tagged = sys.argv[1:5]
+          index = json.load(open(index_path, encoding="utf-8"))
+          if "manifests" not in index:
+              # A single-platform image manifest: the tag already names it, and
+              # the smoke test checks its platform.
+              print(tagged)
+              raise SystemExit(0)
+          os_name, architecture = platform.split("/")[:2]
+          digests = [
+              entry["digest"]
+              for entry in index["manifests"]
+              if entry.get("platform", {}).get("os") == os_name
+              and entry.get("platform", {}).get("architecture") == architecture
+          ]
+          if len(digests) != 1:
+              raise SystemExit(f"expected one {platform} manifest in {tagged}, found {len(digests)}")
+          print(f"{repository}@{digests[0]}")
+          PY
+            )"
+            docker pull --quiet --platform "${platform}" "${reference}"
+            bash scripts/smoke_test_image.sh cli "${reference}" "${platform}"
+          done
 
   # ==========================================================================
   # Sign Container (main branch and version tags)
