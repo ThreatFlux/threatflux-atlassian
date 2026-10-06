@@ -67,7 +67,9 @@ if [[ "${kind}" == "action" ]]; then
 fi
 
 # ENTRYPOINT is tini and CMD is /usr/local/bin/app, so arguments replace CMD.
-echo "ok: tini -> app --version: $(run "${image}" app --version)"
+# Assigned first: set -e ignores a failing substitution inside echo's arguments.
+version_output="$(run "${image}" app --version)"
+echo "ok: tini -> app --version: ${version_output}"
 run "${image}" tflux-atlassian --help >/dev/null
 echo "ok: tini -> tflux-atlassian --help"
 # The exec-form HEALTHCHECK command, run directly as Docker would.
