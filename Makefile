@@ -64,7 +64,7 @@ NC := \033[0m
         coverage coverage-html coverage-summary \
         audit deny advisory-ignores dep-gate sbom security \
         docs-check docs docs-open bench bench-check msrv \
-        image-pins docker-build docker-push \
+        image-pins docker-build docker-smoke docker-push \
         pre-commit ci ci-quick all release-check clean \
         f l t b c
 
@@ -322,6 +322,11 @@ docker-build: image-pins ## Build Docker image
 		--build-arg SBOM_MANIFEST_PATH=$(SBOM_MANIFEST_PATH) \
 		-t $(DOCKER_IMAGE):$(DOCKER_TAG) .
 	@printf '$(GREEN)Docker image built: %s:%s$(NC)\n' '$(DOCKER_IMAGE)' '$(DOCKER_TAG)'
+
+docker-smoke: docker-build ## Smoke-test the built Docker image (nonroot, no shell, CLI, SBOM)
+	@printf '$(CYAN)Smoke-testing Docker image...$(NC)\n'
+	@bash scripts/smoke_test_image.sh cli '$(DOCKER_IMAGE):$(DOCKER_TAG)'
+	@printf '$(GREEN)Docker image smoke test passed!$(NC)\n'
 
 docker-push: ## Push Docker image to registry
 	@printf '$(CYAN)Pushing Docker image...$(NC)\n'

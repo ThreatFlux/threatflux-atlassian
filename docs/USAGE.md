@@ -165,6 +165,9 @@ make ci
   tagged source.
 - GitHub releases attach CycloneDX SBOMs for the SDK and CLI crates.
 - The container image embeds a CycloneDX SBOM at `/usr/share/doc/threatflux-atlassian/sbom.cdx.json`.
+- The container image runs on distroless Debian 13 (`gcr.io/distroless/cc-debian13:nonroot`) as uid 65532, with no
+  shell or package manager. Its entrypoint is `tini`, so pass the CLI as the command, for example
+  `docker run --rm ghcr.io/threatflux/threatflux-atlassian tflux-atlassian --help` (`app` is the same binary).
 - Release publishing verifies the SDK first, publishes it, waits for crates.io index propagation, then verifies and
   publishes the CLI.
 - GitHub Actions publishing should use a shared repo/org `CRATES_IO_TOKEN`; `CARGO_REGISTRY_TOKEN` remains supported as
