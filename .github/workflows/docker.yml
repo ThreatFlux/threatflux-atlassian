@@ -386,7 +386,10 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'
-    # Pulls the pushed image to scan it; it writes nothing.
+    # Pulls the pushed image and keeps its SPDX SBOM as a workflow artifact
+    # only. Attaching it to a GitHub Release would need contents: write for a
+    # third-party action, so release assets stay off; release.yml attaches the
+    # crate SBOMs and the image embeds its own CycloneDX SBOM.
     permissions:
       contents: read
       packages: read
@@ -415,6 +418,7 @@ jobs:
           artifact-name: sbom.spdx.json
           format: spdx-json
           syft-version: v1.54.0
+          upload-release-assets: false
         continue-on-error: true
 
   # ==========================================================================
