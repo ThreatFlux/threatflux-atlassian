@@ -419,10 +419,11 @@ jobs:
       !contains(needs.prepare.outputs.version, '-')
     # Both crates publish through crates.io trusted publishing, which is bound
     # to this repository, release.yml and the crates-io environment, so no
-    # registry token is stored in GitHub. A dry run runs without an environment
-    # (an empty name records no deployment) and never requests a token; one it
-    # requested would not match the trusted publisher and crates.io would
-    # refuse it.
+    # registry token is stored in GitHub. That environment only deploys from v*
+    # tags, so a real run must be on the release tag. A dry run runs without an
+    # environment (an empty name records no deployment) and never requests a
+    # token; one it requested would not match the trusted publisher and
+    # crates.io would refuse it.
     environment:
       name: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) && 'crates-io' || '' }}
       url: https://crates.io/crates/threatflux-atlassian-cli

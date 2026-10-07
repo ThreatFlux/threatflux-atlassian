@@ -164,7 +164,9 @@ make ci
 - GitHub release tags identify artifact/source releases and can differ from the Cargo package versions embedded in the
   tagged source.
 - GitHub releases attach CycloneDX SBOMs for the SDK and CLI crates.
-- The container image embeds a CycloneDX SBOM at `/usr/share/doc/threatflux-atlassian/sbom.cdx.json`.
+- The container image embeds a CycloneDX SBOM at `/usr/share/doc/threatflux-atlassian/sbom.cdx.json`. The Docker
+  workflow also keeps an SPDX SBOM of each pushed image as the `sbom.spdx.json` workflow artifact; it is not attached
+  to the GitHub Release, so that job never needs write access to repository contents.
 - The container image runs on distroless Debian 13 (`gcr.io/distroless/cc-debian13:nonroot`) as uid 65532, with no
   shell or package manager. Its entrypoint is `tini`, so pass the CLI as the command, for example
   `docker run --rm ghcr.io/threatflux/threatflux-atlassian tflux-atlassian --help` (`app` is the same binary).
@@ -174,6 +176,9 @@ make ci
 - Publishing uses [crates.io trusted publishing](https://crates.io/docs/trusted-publishing): the `release.yml` publish
   job runs in the `crates-io` environment and exchanges its GitHub OIDC identity for a short-lived token through
   `rust-lang/crates-io-auth-action`. No crates.io API token is stored in GitHub, and dry runs never request one.
+  The `crates-io` environment only deploys from `v*` tags, so a real publish runs from the release tag push (or a
+  dispatch on that tag, `gh workflow run release.yml --ref vX.Y.Z -f version=X.Y.Z`); a real run dispatched on a
+  branch stops at the publish job.
 - Auto Release cuts releases with the `threatflux-automation` GitHub App. `main` is protected, so the App pushes the
   version bump to `automation/release` and opens a `chore(release): vX.Y.Z` pull request whose CI runs like any other.
   Once it is merged, the next Auto Release run tags the merged commit as the App, and that tag push starts
