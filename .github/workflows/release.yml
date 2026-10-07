@@ -100,14 +100,35 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      # Notes come from the CHANGELOG.md section headed "## [VERSION]" (with an
+      # optional " - date") when there is one. Without it the release keeps the
+      # notes Auto Release wrote from the conventional commits when it created
+      # the release, and a release created here gets GitHub-generated notes, so
+      # a missing section never replaces real notes with an empty body.
       - name: Generate release notes
+        id: notes
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          echo "## Release v$VERSION" > release_notes.md
-          echo "" >> release_notes.md
-          if [ -f CHANGELOG.md ]; then
-            awk "/## \[$VERSION\]/,/## \[/" CHANGELOG.md | sed '1d;$d' >> release_notes.md 2>/dev/null || echo "See CHANGELOG.md for details" >> release_notes.md
+          set -euo pipefail
+          NOTES=""
+          if [[ -f CHANGELOG.md ]]; then
+            NOTES="$(awk -v heading="## [${VERSION}]" '
+              index($0, heading) == 1 && (length($0) == length(heading) || substr($0, length(heading) + 1, 3) == " - ") { in_release = 1; next }
+              in_release && /^## \[/ { exit }
+              in_release { print }
+            ' CHANGELOG.md)"
+          fi
+          if [[ -n "${NOTES//[[:space:]]/}" ]]; then
+            {
+              echo "## Release v${VERSION}"
+              echo
+              printf '%s\n' "${NOTES}"
+            } > release_notes.md
+            echo "changelog=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "CHANGELOG.md has no notes for ${VERSION}"
+            echo "changelog=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Report dry run
@@ -115,9 +136,14 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
           VALIDATED_RELEASE_REVISION: ${{ steps.revision.outputs.value }}
+          CHANGELOG_NOTES: ${{ steps.notes.outputs.changelog }}
         run: |
           echo "Dry run: building ${VALIDATED_RELEASE_REVISION} as v${VERSION} without creating or checking a tag or release"
-          cat release_notes.md
+          if [[ "${CHANGELOG_NOTES}" == "true" ]]; then
+            cat release_notes.md
+          else
+            echo "Release notes: an existing release keeps its notes; a new release would get GitHub-generated notes"
+          fi
 
       - name: Create or update GitHub Release
         if: env.DRY_RUN != 'true'
@@ -126,6 +152,7 @@ jobs:
           VALIDATED_RELEASE_REVISION: ${{ steps.revision.outputs.value }}
           VERSION: ${{ steps.version.outputs.version }}
           INPUT_PRERELEASE: ${{ inputs.prerelease && 'true' || 'false' }}
+          CHANGELOG_NOTES: ${{ steps.notes.outputs.changelog }}
         run: |
           set -euo pipefail
           TAG="v${VERSION}"
@@ -150,25 +177,36 @@ jobs:
             IS_PRERELEASE="true"
           fi
 
+          if [[ "${CHANGELOG_NOTES}" == "true" ]]; then
+            NOTES_ARGS=(--notes-file release_notes.md)
+          else
+            NOTES_ARGS=()
+          fi
+
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # Without a CHANGELOG section this only sets the title, so the notes
+            # Auto Release wrote stay in place.
             gh release edit "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --title "$TITLE" \
-              --notes-file release_notes.md
+              "${NOTES_ARGS[@]}"
           else
+            if [[ "${CHANGELOG_NOTES}" != "true" ]]; then
+              NOTES_ARGS=(--generate-notes)
+            fi
             if [[ "${IS_PRERELEASE}" == "true" ]]; then
               gh release create "$TAG" \
                 --repo "$GITHUB_REPOSITORY" \
                 --target "$VALIDATED_RELEASE_REVISION" \
                 --title "$TITLE" \
-                --notes-file release_notes.md \
+                "${NOTES_ARGS[@]}" \
                 --prerelease
             else
               gh release create "$TAG" \
                 --repo "$GITHUB_REPOSITORY" \
                 --target "$VALIDATED_RELEASE_REVISION" \
                 --title "$TITLE" \
-                --notes-file release_notes.md
+                "${NOTES_ARGS[@]}"
             fi
           fi
 

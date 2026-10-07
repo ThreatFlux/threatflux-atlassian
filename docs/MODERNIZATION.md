@@ -90,8 +90,8 @@ checks ancestry, then passes only the vetted immutable `release_revision` to
 downstream checkouts. A release tag that does not exist yet is created at that
 revision, and an existing tag must already resolve to it, so the tag and the
 uploaded artifacts always name the same commit. Compiler and tool setup precede the selected source
-checkout, and checkout credentials are not persisted. The existing auto-release
-owner merges its release PR into main before tagging and dispatches by that tag,
+checkout, and checkout credentials are not persisted. Auto Release merges its
+release PR into main before tagging, and the release workflow runs on that tag,
 so its normal release flow meets this policy. Temporary Git self-tests run in
 Quick Check and the local lint guard, including rejection and branch-movement
 cases. No scanner finding is dismissed or excluded to implement this boundary.
