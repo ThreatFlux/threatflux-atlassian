@@ -9,6 +9,13 @@ the notes of its GitHub Release.
 
 ## [Unreleased]
 
+### Fixed
+
+- `release.yml` writes the Windows archive's `.sha256` file with an LF line ending, like the Unix archives' files.
+  Every `tflux-atlassian-windows-amd64.zip.sha256` asset published so far (0.5.0 to 0.5.2) ends in CRLF, so
+  `shasum -a 256 -c` and macOS `sha256sum -c` report the archive as missing; check one with
+  `tr -d '\r' < tflux-atlassian-windows-amd64.zip.sha256 | shasum -a 256 -c` (the hash itself is correct).
+
 ## [0.5.2] - 2026-10-07
 
 A maintenance release covering the toolchain, dependencies, container images and release automation. The SDK, CLI
