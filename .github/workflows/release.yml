@@ -116,7 +116,7 @@ jobs:
             NOTES="$(awk -v heading="## [${VERSION}]" '
               index($0, heading) == 1 && (length($0) == length(heading) || substr($0, length(heading) + 1, 3) == " - ") { in_release = 1; next }
               in_release && /^## \[/ { exit }
-              in_release { print }
+              in_release && (started || NF) { started = 1; print }
             ' CHANGELOG.md)"
           fi
           if [[ -n "${NOTES//[[:space:]]/}" ]]; then
