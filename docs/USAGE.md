@@ -174,6 +174,11 @@ make ci
 - Publishing uses [crates.io trusted publishing](https://crates.io/docs/trusted-publishing): the `release.yml` publish
   job runs in the `crates-io` environment and exchanges its GitHub OIDC identity for a short-lived token through
   `rust-lang/crates-io-auth-action`. No crates.io API token is stored in GitHub, and dry runs never request one.
+- Auto Release cuts releases with the `threatflux-automation` GitHub App. `main` is protected, so the App pushes the
+  version bump to `automation/release` and opens a `chore(release): vX.Y.Z` pull request whose CI runs like any other.
+  Once it is merged, the next Auto Release run tags the merged commit as the App, and that tag push starts
+  `release.yml` and `docker.yml`. The GitHub Release keeps the notes Auto Release writes from the conventional commits
+  unless `CHANGELOG.md` has a `## [X.Y.Z]` section for the version.
 
 ## GitHub Action Usage
 

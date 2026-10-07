@@ -386,6 +386,10 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'
+    # Pulls the pushed image to scan it; it writes nothing.
+    permissions:
+      contents: read
+      packages: read
 
     steps:
       - name: Checkout
