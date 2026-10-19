@@ -58,7 +58,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master source pin
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master source pin
         with:
           toolchain: ${{ env.RUST_STABLE_VERSION }}
           components: rustfmt, clippy
@@ -154,7 +154,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master source pin
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master source pin
         with:
           toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
 
@@ -211,7 +211,7 @@ jobs:
           persist-credentials: false
 
       - name: Install MSRV toolchain
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master source pin
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master source pin
         with:
           toolchain: ${{ env.RUST_MSRV_VERSION }}
 
@@ -246,7 +246,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master source pin
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master source pin
         with:
           toolchain: ${{ env.RUST_STABLE_VERSION }}
 
@@ -256,7 +256,7 @@ jobs:
           cargo --version
 
       - name: Install cargo-hack
-        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-hack@0.6.45
 
@@ -308,7 +308,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master source pin
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master source pin
         with:
           toolchain: ${{ env.RUST_STABLE_VERSION }}
 
@@ -342,7 +342,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master source pin
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master source pin
         with:
           toolchain: ${{ env.RUST_STABLE_VERSION }}
 
@@ -381,7 +381,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master source pin
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master source pin
         with:
           toolchain: ${{ env.RUST_STABLE_VERSION }}
           components: llvm-tools-preview
@@ -392,7 +392,7 @@ jobs:
           cargo --version
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-llvm-cov@0.9.1
 
