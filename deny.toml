@@ -92,11 +92,13 @@ yanked = "warn"
 # an entry added or removed here has to be added or removed there in the same
 # commit.
 ignore = [
-    # fluxencrypt currently depends on rsa 0.9.x and RustSec has not published
-    # a fixed upgrade path for RUSTSEC-2023-0071 yet. The SDK's `encrypted-env`
-    # feature takes that path out of the Action's graph and out of any consumer
-    # on `default-features = false`, but `full` is still the default and the CLI
-    # uses fluxencrypt directly, so the advisory is not discharged.
+    # The original encrypted-env/CLI path was a real timing TP. The root
+    # immutable FluxEncrypt patch uses AWS-LC for private OAEP decryption.
+    # RSA remains for public/key-codec compatibility; its raw private accessor
+    # can still expose consumers invoking upstream decrypt/sign themselves.
+    # Published consumers are NOT fixed by a root patch: registry publishing
+    # is blocked until a fixed stable FluxEncrypt requirement is available.
+    # See docs/security/dependency-security-rollup.md for exact scope.
     "RUSTSEC-2023-0071",
 ]
 

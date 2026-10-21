@@ -37,7 +37,22 @@ permissions:
   pull-requests: read
 
 jobs:
+  registry-security:
+    name: Registry security readiness
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout trusted main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Enforce registry security release order
+        run: python3 scripts/check_registry_release.py
+
   release:
+    needs: registry-security
     permissions:
       actions: write
       contents: write

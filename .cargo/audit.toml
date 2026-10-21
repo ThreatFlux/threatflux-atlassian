@@ -12,13 +12,12 @@
 
 [advisories]
 ignore = [
-    # Marvin attack (timing side channel) in `rsa` 0.9.x, which reaches this
-    # workspace only through `fluxencrypt`. `patched = []`: no fixed release of
-    # `rsa` exists, so there is nothing to upgrade to. The SDK's `encrypted-env`
-    # feature makes that path optional -- an SDK consumer on
-    # `default-features = false` and the GitHub Action never link it -- but the
-    # CLI encrypts credentials itself and the SDK's default `full` set keeps the
-    # feature on, so `rsa` is still in the published default graph and the ignore
-    # is still load-bearing.
+    # The original encrypted-env/CLI path was a real timing TP. The root
+    # immutable FluxEncrypt patch uses AWS-LC for private OAEP decryption.
+    # RSA remains for public/key-codec compatibility; its raw private accessor
+    # can still expose consumers invoking upstream decrypt/sign themselves.
+    # Published consumers are NOT fixed by a root patch: registry publishing
+    # is blocked until a fixed stable FluxEncrypt requirement is available.
+    # See docs/security/dependency-security-rollup.md for exact scope.
     "RUSTSEC-2023-0071",
 ]

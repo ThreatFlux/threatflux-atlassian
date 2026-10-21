@@ -8,7 +8,7 @@
 
 CARGO ?= cargo
 RUST_MSRV ?= 1.97.1
-RUST_TOOLCHAIN ?= 1.99.0
+RUST_TOOLCHAIN ?= 1.99.1
 
 # Docker configuration
 # NOTE: DOCKER_IMAGE is an explicit constant, deliberately NOT
@@ -358,6 +358,7 @@ all: ci coverage bench-check ## Full validation suite
 # iteration, so without it a failing sdk dry-run followed by a passing cli
 # dry-run would report success. Publish order (sdk before cli) matters.
 release-check: ## Check release readiness
+	@python3 scripts/check_registry_release.py
 	@printf '$(CYAN)Checking release readiness...$(NC)\n'
 	@$(MAKE) ci
 	@$(MAKE) msrv

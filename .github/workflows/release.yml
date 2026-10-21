@@ -41,9 +41,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_BUILD_JOBS: 2
-  RUSTUP_TOOLCHAIN: 1.99.0
+  RUSTUP_TOOLCHAIN: 1.99.1
   RUST_BACKTRACE: 1
-  RUST_VERSION: 1.99.0
+  RUST_VERSION: 1.99.1
   BINARY_NAME: tflux-atlassian
   CLI_PACKAGE: threatflux-atlassian-cli
   SDK_PACKAGE: threatflux-atlassian-sdk
@@ -80,6 +80,9 @@ jobs:
         env:
           VALIDATED_RELEASE_REVISION: ${{ steps.revision.outputs.value }}
         run: git checkout --detach "$VALIDATED_RELEASE_REVISION" --
+
+      - name: Enforce registry security release order
+        run: python3 scripts/check_registry_release.py
 
       # The version is validated before it reaches GITHUB_OUTPUT, so later steps
       # and jobs only ever see a well-formed value.
@@ -253,7 +256,7 @@ jobs:
     steps:
       # Install and verify trusted tools before checking out a custom release ref.
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master source pin
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: ${{ env.RUST_VERSION }}
           targets: ${{ matrix.target }}
@@ -271,7 +274,7 @@ jobs:
 
       - name: Install cross
         if: matrix.use_cross
-        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cross@0.2.5
 
@@ -344,7 +347,7 @@ jobs:
     steps:
       # Install and verify trusted tools before checking out a custom release ref.
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master source pin
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
@@ -354,7 +357,7 @@ jobs:
           cargo --version
 
       - name: Install cargo-cyclonedx
-        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-cyclonedx@0.5.9
 
@@ -438,7 +441,7 @@ jobs:
     steps:
       # Install and verify trusted tools before checking out a custom release ref.
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master source pin
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
