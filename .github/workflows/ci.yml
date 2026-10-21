@@ -35,13 +35,13 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_BUILD_JOBS: 2
-  RUSTUP_TOOLCHAIN: 1.99.0
+  RUSTUP_TOOLCHAIN: 1.99.1
   RUST_BACKTRACE: 1
   RUSTFLAGS: -D warnings
   CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
   RUSTUP_MAX_RETRIES: 10
-  RUST_STABLE_VERSION: 1.99.0
+  RUST_STABLE_VERSION: 1.99.1
   RUST_MSRV_VERSION: 1.97.1
 
 jobs:
@@ -58,7 +58,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master source pin
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: ${{ env.RUST_STABLE_VERSION }}
           components: rustfmt, clippy
@@ -145,7 +145,7 @@ jobs:
             rust: stable
     continue-on-error: ${{ matrix.rust == 'nightly' }}
     env:
-      RUSTUP_TOOLCHAIN: ${{ matrix.rust == 'stable' && '1.99.0' || matrix.rust }}
+      RUSTUP_TOOLCHAIN: ${{ matrix.rust == 'stable' && '1.99.1' || matrix.rust }}
 
     steps:
       - name: Checkout
@@ -154,7 +154,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master source pin
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
 
@@ -211,7 +211,7 @@ jobs:
           persist-credentials: false
 
       - name: Install MSRV toolchain
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master source pin
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: ${{ env.RUST_MSRV_VERSION }}
 
@@ -246,7 +246,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master source pin
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: ${{ env.RUST_STABLE_VERSION }}
 
@@ -256,7 +256,7 @@ jobs:
           cargo --version
 
       - name: Install cargo-hack
-        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-hack@0.6.45
 
@@ -268,7 +268,7 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: ${{ runner.os }}-1.99.0-features-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-1.99.1-features-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Check no default features
         run: cargo check --locked --workspace --no-default-features
@@ -308,7 +308,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master source pin
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: ${{ env.RUST_STABLE_VERSION }}
 
@@ -342,7 +342,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master source pin
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: ${{ env.RUST_STABLE_VERSION }}
 
@@ -359,7 +359,7 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: ${{ runner.os }}-1.99.0-bench-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-1.99.1-bench-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Check benchmarks compile
         run: cargo bench --locked --workspace --all-features --no-run
@@ -381,7 +381,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master source pin
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: ${{ env.RUST_STABLE_VERSION }}
           components: llvm-tools-preview
@@ -392,7 +392,7 @@ jobs:
           cargo --version
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-llvm-cov@0.9.1
 
@@ -404,7 +404,7 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: ${{ runner.os }}-1.99.0-coverage-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-1.99.1-coverage-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Generate coverage
         run: |

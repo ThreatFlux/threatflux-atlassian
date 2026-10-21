@@ -1,0 +1,43 @@
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
+binary: rustc
+commit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67
+commit-date: 2026-10-13
+host: x86_64-unknown-linux-musl
+release: 1.99.1
+LLVM version: 23.1.1
+aws-lc-sys v0.46.0
+[build-dependencies]
+musl-1.2.6-r2 x86_64 {musl} (MIT) [installed]
+musl-dev-1.2.6-r2 x86_64 {musl} (MIT) [installed]
+tini-static-0.19.0-r3 x86_64 {tini} (MIT) [installed]
+ff0d5e7ac47afd296bb8bad4a67d4b0efbc763298a9fe6a4b1ee3e9d0fc6ec68  /usr/lib/libc.a
+1f33e7efb9ea7b4faeca63302082ce1b1380d16ba6d68b720288bd119607c117  /sbin/tini-static
+18ad5e6b1b383da0f07b64e94f68f20021412490d38835e99268569a03c7f449  /native-unwind/libunwind.a
+/usr/lib/gcc/x86_64-alpine-linux-musl/15.2.0/../../../../lib/libc.a
+
+Actual copied CA package record:
+Package: ca-certificates
+Status: install ok installed
+Priority: standard
+Section: misc
+Installed-Size: 387
+Maintainer: Julien Cristau <jcristau@debian.org>
+Architecture: all
+Multi-Arch: foreign
+Version: 20250419+deb13u1
+Depends: openssl (>= 1.1.1), debconf (>= 0.5) | debconf-2.0
+Breaks: ca-certificates-java (<< 20121112+nmu1)
+Enhances: openssl
+Description: Common CA certificates
+ Contains the certificate authorities shipped with Mozilla's browser to allow
+ SSL-based applications to check for the authenticity of SSL connections.
+ .
+ Please note that Debian can neither confirm nor deny whether the
+ certificate authorities whose certificates are included in this package
+ have in any way been audited for trustworthiness or RFC 3647 compliance.
+ Full responsibility to assess them belongs to the local system
+ administrator.
+
+CA bundle SHA256 e9c7b63ee2623386e9b0a3ee32f499d01a8ea23dc83b8383ddff9f8e749543b7
+
+Final native DNS + verified HTTPS probe to reserved example.com with synthetic-only inputs: expected HTTP404 received; no Jira service contacted; verification enabled.

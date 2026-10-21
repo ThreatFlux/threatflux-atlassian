@@ -32,7 +32,7 @@ threatflux-atlassian-sdk = { path = "crates/threatflux-atlassian-sdk", version =
 # no `version` field, so `cargo publish` strips the entry; inheriting it from
 # here would also make `cargo deny` unable to resolve the versionless entry.
 dotenvy = "0.15.7"
-fluxencrypt = "0.7.5"
+fluxencrypt = "0.7.9"
 # Hex encoding for the dedupe label digests. The Action's legacy label ladder
 # has to reproduce an existing on-Jira label byte for byte, so the encoding is a
 # wire format rather than a formatting detail; a shared, lowercase-only encoder
@@ -41,9 +41,9 @@ hex = "0.4.3"
 rand = "0.10.3"
 reqwest = { version = "0.13.5", default-features = false, features = ["form", "json", "multipart", "query", "rustls"] }
 regex = "1.13.1"
-schemars = "1.2.2"
+schemars = "1.2.3"
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
+serde_json = "1.0.154"
 yaml_serde = "0.10.7"
 serial_test = "4.0.1"
 # SHA-1 is here for one reason: recognising legacy dedupe labels that an earlier
@@ -53,16 +53,16 @@ serial_test = "4.0.1"
 # security primitive. Kept on the same major as `sha2` so both resolve the one
 # `digest` trait.
 sha1 = "0.11.0"
-sha2 = "0.11.0"
+sha2 = "0.11.1"
 thiserror = "2.0.21"
-tokio = { version = "1.53.2", features = ["fs", "macros", "rt-multi-thread", "sync"] }
+tokio = { version = "1.54.0", features = ["fs", "macros", "rt-multi-thread", "sync"] }
 tokio-test = "0.4.6"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["fmt", "env-filter"] }
 url = { version = "2.5.8", features = ["serde"] }
-uuid = { version = "1.27.0", features = ["serde", "v4"] }
+uuid = { version = "1.28.0", features = ["serde", "v4"] }
 wiremock = "0.6.5"
-zeroize = { version = "1.9.0", features = ["derive"] }
+zeroize = { version = "1.9.1", features = ["derive"] }
 
 # Clippy levels live here, not in crate-root `#![allow(...)]` attributes: a
 # source-level allow outranks the `-D` flags CI passes on the command line, so a
@@ -94,3 +94,11 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# Temporary immutable security patch: registry FluxEncrypt 0.7.9 reaches the
+# vulnerable RustCrypto private OAEP operation. This reviewed source migrates
+# that private operation to AWS-LC while preserving formats and public types.
+# Do not publish this SDK until an authorized fixed FluxEncrypt registry release
+# is required: root patches do not propagate to published consumers.
+[patch.crates-io]
+fluxencrypt = { git = "https://github.com/ThreatFlux/FluxEncrypt", rev = "3e58b52adf2caa06dd9e64a6043d2f4d1c1b02a5" }
