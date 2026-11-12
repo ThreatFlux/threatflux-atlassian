@@ -18,6 +18,6 @@ if "fluxencrypt" in manifest.get("patch", {}).get("crates-io", {}):
 dependency = manifest.get("workspace", {}).get("dependencies", {}).get("fluxencrypt", "")
 requirement = dependency if isinstance(dependency, str) else dependency.get("version", "")
 version = re.fullmatch(r"[=^~]?(\d+)\.(\d+)\.(\d+)", requirement)
-if version is None or tuple(map(int, version.groups())) < (0, 7, 12):
-    sys.exit("Registry release blocked: require stable FluxEncrypt 0.7.12 or newer with the AWS-LC private-operation fix")
+if version is None or tuple(map(int, version.groups())) < (0, 8, 0):
+    sys.exit("Registry release blocked: require stable FluxEncrypt 0.8.0 or newer with AWS-LC private operations and patched RSA 0.10 types")
 print("No temporary FluxEncrypt security patch blocks registry release")

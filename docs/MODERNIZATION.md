@@ -1,10 +1,25 @@
-# October 2026 modernization
+# SDK dependency modernization
+
+## Current state, 2026-11-12
+
+The workspace uses published FluxEncrypt 0.8.0 with RSA 0.10 and AWS-LC private
+operations. The former RSA advisory exceptions have been removed from both
+audit configurations. The encrypted-environment feature gates and compatibility
+checks remain in hosted CI. Development Rust is 1.99.1 and the supported minimum
+remains 1.97.1.
+
+Tool pins are cargo-llvm-cov 0.9.1, cargo-audit 0.23.0, cargo-deny 0.20.2,
+cargo-cyclonedx 0.5.10 and cargo-hack 0.6.46. Container publication stages source
+tags, validates exact image digests, and serializes mutable alias promotion
+against fresh main and stable release references.
+
+## October 2026 record
 
 Versions were verified on 2026-10-05 against official Rust distribution metadata,
 crates.io, upstream action releases and container registry manifests. This update
 starts from `f2a5637585d79b940b74aa6e017f98299901313f` on `main`.
 
-## Rust and dependencies
+### Rust and dependencies
 
 | Surface | Before | Updated | Evidence |
 | --- | --- | --- | --- |
@@ -19,11 +34,11 @@ crates changed their resolved version. The lockfile refresh updates 97 package
 resolutions and resolves 298 packages, down from 299. There are no prerelease or
 yanked registry packages in the resulting lockfile.
 
-The tool versions are cargo-llvm-cov 0.9.1, cargo-audit 0.22.2, cargo-deny 0.20.2,
-cargo-cyclonedx 0.5.9 and cargo-hack 0.6.45. `make dev-setup` installs these exact
+The tool versions were cargo-llvm-cov 0.9.1, cargo-audit 0.22.2, cargo-deny 0.20.2,
+cargo-cyclonedx 0.5.9 and cargo-hack 0.6.45. `make dev-setup` installed these exact
 versions with `--locked`.
 
-## Compatibility
+### Compatibility
 
 The minimum compiler rises to Rust 1.97.1 because the latest published stable
 FluxEncrypt requires it. The development compiler remains separately pinned to
@@ -41,7 +56,7 @@ without that feature exclude both FluxEncrypt and RSA; the CLI and the SDK's
 default `full` features retain them. The resolved dependency guard verifies both
 presence and absence cases so an empty graph cannot pass accidentally.
 
-## Security
+### Security
 
 The existing [RUSTSEC-2023-0071](https://rustsec.org/advisories/RUSTSEC-2023-0071.html)
 exception remains in the matching cargo-audit and cargo-deny policies. The latest

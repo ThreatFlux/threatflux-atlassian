@@ -16,6 +16,8 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/docker.yml"
+      - "scripts/container_publish_policy.py"
+      - "scripts/test_container_publish_policy.py"
       - "Dockerfile"
       - "action.Dockerfile"
       - "action.yml"
@@ -66,6 +68,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Validate release image source
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/container_publish_policy.py --validate
+
       - name: Lowercase image name
         id: lowercase
         run: echo "image_name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
@@ -94,9 +102,9 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
-          version: v0.37.2
+          driver-opts: image=moby/buildkit:v0.35.0@sha256:aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb
+          version: v0.39.0
           cache-binary: false
-          driver-opts: image=moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
 
       - name: Log in to GitHub Container Registry
         if: github.event_name != 'pull_request'
@@ -111,15 +119,11 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}
+          flavor: latest=false
           tags: |
-            type=ref,event=branch
-            type=ref,event=pr
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
             type=sha,prefix=
-            type=raw,value=latest,enable={{is_default_branch}}
-
+            type=sha,format=long,prefix=
       - name: Build and export (PRs)
         if: github.event_name == 'pull_request'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -183,9 +187,9 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
-          version: v0.37.2
+          driver-opts: image=moby/buildkit:v0.35.0@sha256:aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb
+          version: v0.39.0
           cache-binary: false
-          driver-opts: image=moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
 
       - name: Build Action image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -246,16 +250,16 @@ jobs:
         if: github.event_name != 'pull_request'
         env:
           IMAGE_NAME: ${{ needs.build.outputs.image_name }}
-          SHORT_SHA: ${{ steps.sha.outputs.short }}
-        run: docker pull "${REGISTRY}/${IMAGE_NAME}:${SHORT_SHA}"
+          IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
+        run: docker pull "${REGISTRY}/${IMAGE_NAME}@${IMAGE_DIGEST}"
 
       - name: Run Trivy scanner (informational findings)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          version: v0.76.0
+          version: v0.76.2
           image-ref: >-
             ${{ github.event_name == 'pull_request' && format('{0}:scan', needs.build.outputs.image_name)
-            || format('{0}/{1}:{2}', env.REGISTRY, needs.build.outputs.image_name, steps.sha.outputs.short) }}
+            || format('{0}/{1}@{2}', env.REGISTRY, needs.build.outputs.image_name, needs.build.outputs.digest) }}
           format: "sarif"
           output: "trivy-results.sarif"
           severity: "UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL"
@@ -298,7 +302,7 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           IMAGE_NAME: ${{ needs.build.outputs.image_name }}
-          SHORT_SHA: ${{ steps.sha.outputs.short }}
+          IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
           PLATFORMS: ${{ needs.build.outputs.platforms }}
         run: |
           set -euo pipefail
@@ -306,7 +310,7 @@ jobs:
             bash scripts/smoke_test_image.sh cli "${IMAGE_NAME}:scan" linux/amd64
             exit 0
           fi
-          image="${REGISTRY}/${IMAGE_NAME}:${SHORT_SHA}"
+          image="${REGISTRY}/${IMAGE_NAME}@${IMAGE_DIGEST}"
           docker buildx imagetools inspect --raw "${image}" > "${RUNNER_TEMP}/image-index.json"
           IFS=',' read -ra platforms <<< "${PLATFORMS}"
           for platform in "${platforms[@]}"; do
@@ -414,12 +418,11 @@ jobs:
       - name: Generate SBOM
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
-          image: ${{ env.REGISTRY }}/${{ needs.build.outputs.image_name }}:${{ steps.sha.outputs.short }}
+          upload-release-assets: false
+          syft-version: v1.57.1
+          image: ${{ env.REGISTRY }}/${{ needs.build.outputs.image_name }}@${{ needs.build.outputs.digest }}
           artifact-name: sbom.spdx.json
           format: spdx-json
-          syft-version: v1.55.0
-          upload-release-assets: false
-        continue-on-error: true
 
   # ==========================================================================
   # Docker Success Gate
@@ -427,7 +430,7 @@ jobs:
   docker-success:
     name: Docker Success
     runs-on: ubuntu-latest
-    needs: [build, action-image, scan]
+    needs: [build, action-image, scan, sign, sbom, promote]
     if: always()
     steps:
       - name: Check Docker jobs
@@ -435,6 +438,7 @@ jobs:
           BUILD_RESULT: ${{ needs.build.result }}
           ACTION_IMAGE_RESULT: ${{ needs.action-image.result }}
           SCAN_RESULT: ${{ needs.scan.result }}
+          PROMOTE_RESULT: ${{ needs.promote.result }}
         run: |
           if [[ "${BUILD_RESULT}" != "success" || \
                 "${ACTION_IMAGE_RESULT}" != "success" || \
@@ -442,4 +446,60 @@ jobs:
             echo "Docker build or scan failed"
             exit 1
           fi
+          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" && "${PROMOTE_RESULT}" != "success" ]]; then
+            echo "Verified container alias promotion failed"
+            exit 1
+          fi
           echo "Docker workflow completed successfully"
+
+  promote:
+    name: Promote verified container aliases
+    needs: [build, scan, sign, sbom]
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ${{ vars.RUST_TEMPLATE_RUNNER_UBUNTU || 'ubuntu-latest' }}
+    concurrency:
+      group: container-alias-promotion
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout the already built and scanned source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=moby/buildkit:v0.35.0@sha256:aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb
+          version: v0.39.0
+
+      - name: Log in to registry
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Re-evaluate refs and promote only the verified digests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIGEST: ${{ needs.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          IMAGE_NAME="${GITHUB_REPOSITORY,,}"
+          [[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          # The concurrency lock covers this fresh decision and all promotions.
+          # A historical retry cannot finish after a newer promotion and rewind it.
+          python3 scripts/container_publish_policy.py > "$RUNNER_TEMP/alias-policy.json"
+          mapfile -t runtime_aliases < <(jq -r '.runtime[]' "$RUNNER_TEMP/alias-policy.json")
+          images=("$REGISTRY/$IMAGE_NAME")
+          for image in "${images[@]}"; do
+            for alias in "${runtime_aliases[@]}"; do
+              docker buildx imagetools create --tag "$image:$alias" "$image@$DIGEST"
+              actual="$(docker buildx imagetools inspect "$image:$alias" --format '{{.Manifest.Digest}}')"
+              [[ "$actual" == "$DIGEST" ]]
+            done
+          done

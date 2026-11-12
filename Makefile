@@ -88,10 +88,10 @@ dev-setup: ## Install development tools
 	@rustup toolchain install $(RUST_TOOLCHAIN) --profile minimal
 	@rustup component add rustfmt clippy llvm-tools-preview --toolchain $(RUST_TOOLCHAIN)
 	@$(CARGO) install cargo-llvm-cov --locked --version 0.9.1
-	@$(CARGO) install cargo-audit --locked --version 0.22.2
+	@$(CARGO) install cargo-audit --locked --version 0.23.0
 	@$(CARGO) install cargo-deny --locked --version 0.20.2
-	@$(CARGO) install cargo-cyclonedx --locked --version 0.5.9
-	@$(CARGO) install cargo-hack --locked --version 0.6.45
+	@$(CARGO) install cargo-cyclonedx --locked --version 0.5.10
+	@$(CARGO) install cargo-hack --locked --version 0.6.46
 	@printf '$(GREEN)Development tools installed!$(NC)\n'
 
 # The hook body is written with printf, not `echo '...\n...'`: /bin/bash emits a

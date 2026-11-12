@@ -52,9 +52,8 @@ jobs:
           cargo --version
 
       - name: Install cargo-audit
-        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
-        with:
-          tool: cargo-audit@0.22.2
+        # This version has no hash entry in the pinned binary installer manifest.
+        run: cargo install --locked --version 0.23.0 cargo-audit
 
       # The ignore list is `.cargo/audit.toml`, not a flag. cargo-deny cannot
       # read that file, so `deny.toml` keeps its own copy and this checker fails
@@ -150,9 +149,8 @@ jobs:
           cargo --version
 
       - name: Install cargo-cyclonedx
-        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
-        with:
-          tool: cargo-cyclonedx@0.5.9
+        # This version has no hash entry in the pinned binary installer manifest.
+        run: cargo install --locked --version 0.5.10 cargo-cyclonedx
 
       - name: Generate SBOM
         run: make sbom
@@ -184,7 +182,7 @@ jobs:
       - name: TruffleHog Scan (informational findings)
         uses: trufflesecurity/trufflehog@ea68ca03c865c5f324e86e849ced20ed3cf9dbbb # v3.99.8
         with:
-          version: 3.97.9
+          version: 3.99.8
           extra_args: --only-verified
         continue-on-error: true
 

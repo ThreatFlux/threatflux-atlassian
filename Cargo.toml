@@ -32,7 +32,7 @@ threatflux-atlassian-sdk = { path = "crates/threatflux-atlassian-sdk", version =
 # no `version` field, so `cargo publish` strips the entry; inheriting it from
 # here would also make `cargo deny` unable to resolve the versionless entry.
 dotenvy = "0.15.7"
-fluxencrypt = "0.7.12"
+fluxencrypt = "0.8.0"
 # Hex encoding for the dedupe label digests. The Action's legacy label ladder
 # has to reproduce an existing on-Jira label byte for byte, so the encoding is a
 # wire format rather than a formatting detail; a shared, lowercase-only encoder

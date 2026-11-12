@@ -41,7 +41,7 @@ RUN build_target="$(rustc -vV | sed -n 's/^host: //p')" && \
     { rustc -vV; cargo tree --locked -p aws-lc-sys --depth 0; apk list --installed musl musl-dev tini-static; \
        sha256sum /usr/lib/libc.a /sbin/tini-static /native-unwind/libunwind.a; \
        grep -oE '/[^[:space:](]+/libc\.a' /native-link.map | sort -u; } > /out/doc/native-build.txt
-RUN cargo install cargo-cyclonedx --locked --version 0.5.9 && \
+RUN cargo install cargo-cyclonedx --locked --version 0.5.10 && \
     cargo cyclonedx --manifest-path "${SBOM_MANIFEST_PATH}" --all-features \
       --format json --spec-version 1.5 --override-filename cli-sbom && \
     find /build -name cli-sbom.json -exec cp {} /out/doc/sbom.cdx.json \; -quit && \
