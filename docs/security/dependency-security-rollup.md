@@ -48,10 +48,13 @@ Classification: **20 affected-component TPs, 10 artifact-specific FPs, 1 undeter
 
 ### Registry adoption on 2026-11-12
 
-The workspace now requires published FluxEncrypt 0.7.12 and no longer relies on
+The workspace now requires published FluxEncrypt 0.8.0 and no longer relies on
 the root Git patch. The published crate's `src/encryption/rsa_oaep.rs` uses
 AWS-LC `PrivateDecryptingKey` and `OaepPrivateDecryptingKey` for the private
-OAEP-SHA512/MGF1-SHA512 operation, retaining the reviewed format and key APIs.
+OAEP-SHA512/MGF1-SHA512 operation, retaining the reviewed persisted formats.
+The public underlying RSA types now use patched RSA 0.10, so both matching
+advisory-ignore lists are empty. The SDK consumes the hybrid encryption API;
+its public API does not expose those underlying RSA types.
 The release-order guard remains enabled and now permits this registry graph.
 Encrypted-environment compatibility and package verification remain hosted
 release gates. The earlier source-only blocker below describes the historical

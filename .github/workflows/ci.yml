@@ -79,6 +79,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-registry-
 
+      - name: Check container publication ordering
+        run: python3 -m unittest discover -s scripts -p test_container_publish_policy.py
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
@@ -258,7 +261,7 @@ jobs:
       - name: Install cargo-hack
         uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
-          tool: cargo-hack@0.6.45
+          tool: cargo-hack@0.6.46
 
       - name: Cache cargo
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -422,10 +425,10 @@ jobs:
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
+          version: v11.3.2
           use_oidc: true
           files: lcov.info
           fail_ci_if_error: false
-          version: v11.3.1
 
   # ==========================================================================
   # CI Success Gate

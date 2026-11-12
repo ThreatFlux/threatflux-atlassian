@@ -3,7 +3,8 @@
 
 `encrypted-env` exists so that a consumer who does not use
 `JIRA_API_TOKEN_ENCRYPTED`/`ENV_FILE_ENCRYPTED` does not link `fluxencrypt`, and
-through it `rsa` 0.9.x -- RUSTSEC-2023-0071, which has no patched release. A
+through it RSA and AWS-LC. FluxEncrypt 0.8 uses patched RSA 0.10 types, while
+feature gating still avoids the unused cryptography dependency graph. A
 cfg-gate in `config.rs` alone does not achieve that: the dependency has to be
 `optional` in the manifest, and every crate that must not link it has to reach
 the SDK through an entry that does not enable the feature.
