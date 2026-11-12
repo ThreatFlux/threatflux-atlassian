@@ -46,6 +46,17 @@ Classification: **20 affected-component TPs, 10 artifact-specific FPs, 1 undeter
 
 ## Reachable private RSA advisory
 
+### Registry adoption on 2026-11-12
+
+The workspace now requires published FluxEncrypt 0.7.12 and no longer relies on
+the root Git patch. The published crate's `src/encryption/rsa_oaep.rs` uses
+AWS-LC `PrivateDecryptingKey` and `OaepPrivateDecryptingKey` for the private
+OAEP-SHA512/MGF1-SHA512 operation, retaining the reviewed format and key APIs.
+The release-order guard remains enabled and now permits this registry graph.
+Encrypted-environment compatibility and package verification remain hosted
+release gates. The earlier source-only blocker below describes the historical
+0.7.9 state; it no longer describes the current manifest and lockfile.
+
 The original default `full` / `encrypted-env` feature and CLI reach `HybridCipher::decrypt` in `crates/threatflux-atlassian-sdk/src/config.rs`; RUSTSEC-2023-0071 is a real private-operation TP. Merely using latest registry FluxEncrypt 0.7.9 does not remediate it. The workspace pins the [reviewed upstream fix](https://github.com/ThreatFlux/FluxEncrypt/commit/3e58b52adf2caa06dd9e64a6043d2f4d1c1b02a5) by immutable Cargo patch revision, validated by all encrypted-environment compatibility tests. The upstream change moves private OAEP-SHA512/MGF1-SHA512 decryption to AWS-LC, preserving formats and raw key API. The raw RSA accessor/upstream package advisory remains relevant to consumers invoking private operations directly.
 
 **Release-order blocker:** a root Cargo patch does not propagate to published SDK consumers. Do not publish this workspace until the reviewed fix has an authorized stable FluxEncrypt registry release and the registry requirement/lockfile has been updated and revalidated. This work does not authorize publishing. `scripts/check_registry_release.py` enforces the block in local release readiness, automatic release and validated-source manual/tag releases until the temporary root patch is replaced by a fixed stable registry requirement. See [RustSec](https://rustsec.org/advisories/RUSTSEC-2023-0071.html) and the linked upstream fix in the PR.

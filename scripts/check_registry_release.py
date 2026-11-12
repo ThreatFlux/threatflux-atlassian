@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Do not publish an SDK whose security fix exists only in a root Cargo patch."""
 from pathlib import Path
+import re
 import sys
 import tomllib
 
@@ -14,4 +15,9 @@ if "fluxencrypt" in manifest.get("patch", {}).get("crates-io", {}):
         "release, remove this temporary patch, and revalidate package verification "
         "before releasing this workspace. See docs/security/dependency-security-rollup.md."
     )
+dependency = manifest.get("workspace", {}).get("dependencies", {}).get("fluxencrypt", "")
+requirement = dependency if isinstance(dependency, str) else dependency.get("version", "")
+version = re.fullmatch(r"[=^~]?(\d+)\.(\d+)\.(\d+)", requirement)
+if version is None or tuple(map(int, version.groups())) < (0, 7, 12):
+    sys.exit("Registry release blocked: require stable FluxEncrypt 0.7.12 or newer with the AWS-LC private-operation fix")
 print("No temporary FluxEncrypt security patch blocks registry release")
