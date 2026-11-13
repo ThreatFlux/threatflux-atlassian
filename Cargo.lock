@@ -2133,7 +2133,7 @@ dependencies = [
 
 [[package]]
 name = "threatflux-atlassian-action"
-version = "0.5.5"
+version = "0.5.6"
 dependencies = [
  "anyhow",
  "hex",
@@ -2154,7 +2154,7 @@ dependencies = [
 
 [[package]]
 name = "threatflux-atlassian-cli"
-version = "0.5.5"
+version = "0.5.6"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -2172,7 +2172,7 @@ dependencies = [
 
 [[package]]
 name = "threatflux-atlassian-sdk"
-version = "0.5.5"
+version = "0.5.6"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -2199,7 +2199,7 @@ dependencies = [
 
 [[package]]
 name = "threatflux-atlassian-testkit"
-version = "0.5.5"
+version = "0.5.6"
 dependencies = [
  "base64 0.23.1",
  "reqwest",
