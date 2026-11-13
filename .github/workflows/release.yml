@@ -41,9 +41,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_BUILD_JOBS: 2
-  RUSTUP_TOOLCHAIN: 1.99.1
+  RUSTUP_TOOLCHAIN: 1.100.0
   RUST_BACKTRACE: 1
-  RUST_VERSION: 1.99.1
+  RUST_VERSION: 1.100.0
   BINARY_NAME: tflux-atlassian
   CLI_PACKAGE: threatflux-atlassian-cli
   SDK_PACKAGE: threatflux-atlassian-sdk

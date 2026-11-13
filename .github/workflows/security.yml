@@ -25,8 +25,8 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_BUILD_JOBS: 2
-  RUSTUP_TOOLCHAIN: 1.99.1
-  RUST_VERSION: 1.99.1
+  RUSTUP_TOOLCHAIN: 1.100.0
+  RUST_VERSION: 1.100.0
 
 jobs:
   # ==========================================================================
@@ -180,9 +180,9 @@ jobs:
           persist-credentials: false
 
       - name: TruffleHog Scan (informational findings)
-        uses: trufflesecurity/trufflehog@ea68ca03c865c5f324e86e849ced20ed3cf9dbbb # v3.99.8
+        uses: trufflesecurity/trufflehog@3bd2b5887eb0efb8fa18bfd1d296032924e4ffdc # v3.99.9
         with:
-          version: 3.99.8
+          version: 3.99.9@sha256:2ec535840f860aa27f11fee20222fb790326ecd66325c96bd49d02ec6af46eca
           extra_args: --only-verified
         continue-on-error: true
 

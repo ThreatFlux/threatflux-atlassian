@@ -180,7 +180,10 @@ make ci
   dispatch on that tag, `gh workflow run release.yml --ref vX.Y.Z -f version=X.Y.Z`); a real run dispatched on a
   branch stops at the publish job.
 - Auto Release cuts releases with the `threatflux-automation` GitHub App. `main` is protected, so the App pushes the
-  version bump to `automation/release` and opens a `chore(release): vX.Y.Z` pull request whose CI runs like any other.
+  version bump to `automation/release/auto` and opens a `chore(release): vX.Y.Z` pull request whose CI runs like any other.
+  Explicit manual `patch`, `minor`, or `major` requests use separate
+  `automation/release/manual-<bump>` branches so an automatic patch proposal cannot
+  replace an open manual major/minor release proposal.
   Once it is merged, the next Auto Release run tags the merged commit as the App, and that tag push starts
   `release.yml` and `docker.yml`. The GitHub Release keeps the notes Auto Release writes from the conventional commits
   unless `CHANGELOG.md` has a `## [X.Y.Z]` section for the version.
