@@ -11,6 +11,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 
 FROM rust:1.100.0-alpine3.24@sha256:de1e0058543a81ed7b046629167db587c67a94bdf37cce14eb27f0ec83baaffb AS builder
 
+SHELL ["/bin/ash", "-eo", "pipefail", "-c"]
+
 # Install the source-requested components as root before unprivileged builds.
 ENV RUST_VERSION=1.100.0
 RUN rustup component add --toolchain 1.100.0 clippy rustfmt llvm-tools-preview \
