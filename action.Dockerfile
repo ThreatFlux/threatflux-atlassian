@@ -9,7 +9,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && dpkg-query -s ca-certificates > /ca-certificates.status \
     && rm -rf /var/lib/apt/lists/*
 
-FROM rust:1.99.1-alpine3.24@sha256:44819b27be4c97b0e4d7203bd2e02c4820f97700211b6a37fb4c246a2de59383 AS builder
+FROM rust:1.100.0-alpine3.24@sha256:de1e0058543a81ed7b046629167db587c67a94bdf37cce14eb27f0ec83baaffb AS builder
+
+# Install the source-requested components as root before unprivileged builds.
+ENV RUST_VERSION=1.100.0
+RUN rustup component add --toolchain 1.100.0 clippy rustfmt llvm-tools-preview \
+    && rustup default 1.100.0 \
+    && test "$(rustc --version | cut -d ' ' -f 2)" = "1.100.0"
 ARG CARGO_BUILD_JOBS=2
 ENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}
 # hadolint ignore=DL3018

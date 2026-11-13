@@ -5,7 +5,7 @@
 The workspace uses published FluxEncrypt 0.8.0 with RSA 0.10 and AWS-LC private
 operations. The former RSA advisory exceptions have been removed from both
 audit configurations. The encrypted-environment feature gates and compatibility
-checks remain in hosted CI. Development Rust is 1.99.1 and the supported minimum
+checks remain in hosted CI. Development Rust is 1.100.0 and the supported minimum
 remains 1.97.1.
 
 Tool pins are cargo-llvm-cov 0.9.1, cargo-audit 0.23.0, cargo-deny 0.20.2,

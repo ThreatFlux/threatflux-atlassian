@@ -35,13 +35,13 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_BUILD_JOBS: 2
-  RUSTUP_TOOLCHAIN: 1.99.1
+  RUSTUP_TOOLCHAIN: 1.100.0
   RUST_BACKTRACE: 1
   RUSTFLAGS: -D warnings
   CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
   RUSTUP_MAX_RETRIES: 10
-  RUST_STABLE_VERSION: 1.99.1
+  RUST_STABLE_VERSION: 1.100.0
   RUST_MSRV_VERSION: 1.97.1
 
 jobs:
@@ -148,7 +148,7 @@ jobs:
             rust: stable
     continue-on-error: ${{ matrix.rust == 'nightly' }}
     env:
-      RUSTUP_TOOLCHAIN: ${{ matrix.rust == 'stable' && '1.99.1' || matrix.rust }}
+      RUSTUP_TOOLCHAIN: ${{ matrix.rust == 'stable' && '1.100.0' || matrix.rust }}
 
     steps:
       - name: Checkout
@@ -162,9 +162,17 @@ jobs:
           toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
 
       - name: Verify selected compiler
+        shell: bash
         run: |
+          set -euo pipefail
           rustc --version --verbose
           cargo --version
+          actual=$(rustc --version | cut -d ' ' -f 2)
+          case "$RUSTUP_TOOLCHAIN" in
+            beta) [[ "$actual" == *-beta* ]] ;;
+            nightly) [[ "$actual" == *-nightly* ]] ;;
+            *) test "$actual" = "$RUSTUP_TOOLCHAIN" ;;
+          esac
 
       - name: Install dependencies (Ubuntu)
         if: matrix.os == 'linux'
@@ -216,12 +224,20 @@ jobs:
       - name: Install MSRV toolchain
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
-          toolchain: ${{ env.RUST_MSRV_VERSION }}
+          toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
 
-      - name: Verify selected compiler
+      - name: Verify selected MSRV compiler
+        shell: bash
         run: |
+          set -euo pipefail
           rustc --version --verbose
           cargo --version
+          actual=$(rustc --version | cut -d ' ' -f 2)
+          case "$RUSTUP_TOOLCHAIN" in
+            beta) [[ "$actual" == *-beta* ]] ;;
+            nightly) [[ "$actual" == *-nightly* ]] ;;
+            *) test "$actual" = "$RUSTUP_TOOLCHAIN" ;;
+          esac
 
       - name: Cache cargo
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -271,7 +287,7 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: ${{ runner.os }}-1.99.1-features-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-1.100.0-features-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Check no default features
         run: cargo check --locked --workspace --no-default-features
@@ -362,7 +378,7 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: ${{ runner.os }}-1.99.1-bench-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-1.100.0-bench-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Check benchmarks compile
         run: cargo bench --locked --workspace --all-features --no-run
@@ -407,7 +423,7 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: ${{ runner.os }}-1.99.1-coverage-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-1.100.0-coverage-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Generate coverage
         run: |
