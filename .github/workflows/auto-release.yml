@@ -65,11 +65,17 @@ jobs:
       dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
       # main is protected with enforce_admins, so the version bump cannot be
       # fast-forwarded onto it. The threatflux-automation GitHub App pushes the
-      # bump to automation/release and opens the release PR, which starts this
+      # bump to its reserved automation/release/* branch and opens the PR; this
       # repository's pull_request CI. Once that PR is merged, the next run tags
       # the merged commit with the App token.
       create-pr: true
-      release-branch: automation/release
+      # Explicit manual bumps own distinct reserved branches so an automatic
+      # patch proposal cannot replace an open manual major/minor release PR.
+      release-branch: >-
+        ${{ github.event_name == 'workflow_dispatch'
+            && contains(fromJSON('["patch","minor","major"]'), inputs.version_bump)
+            && format('automation/release/manual-{0}', inputs.version_bump)
+            || 'automation/release/auto' }}
       required-workflows: CI,Security
       # The App's tag push is an ordinary push, so release.yml (push: tags
       # v*.*.*) and docker.yml (push: tags v*) start by themselves and the
