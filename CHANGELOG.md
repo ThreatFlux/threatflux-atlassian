@@ -9,6 +9,11 @@ the notes of its GitHub Release.
 
 ## [Unreleased]
 
+### Changed
+
+- The legacy OAuth SDK's `AccessToken::expires_at` now uses `jiff::Timestamp` after replacing the unmaintained
+  Chrono crate. Existing RFC 3339 token timestamps still deserialize, including timestamps with UTC offsets.
+
 ### Fixed
 
 - `release.yml` writes the Windows archive's `.sha256` file with an LF line ending, like the Unix archives' files.

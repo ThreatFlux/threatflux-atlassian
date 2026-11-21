@@ -10,6 +10,7 @@ use crate::error::{
 };
 use crate::secret::{zeroize_string, SecretString};
 use base64::Engine;
+use jiff::{SignedDuration, Timestamp};
 use reqwest::header::HeaderValue;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -53,8 +54,8 @@ pub struct AccessToken {
     pub access_token: SecretString,
     /// Token type (usually "Bearer")
     pub token_type: String,
-    /// Token expiration timestamp
-    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// UTC token expiration timestamp, deserialized from an RFC 3339 string.
+    pub expires_at: Option<Timestamp>,
     /// Refresh token for renewals
     pub refresh_token: Option<SecretString>,
     /// Granted scopes
@@ -280,10 +281,7 @@ impl AuthManager {
 
         let token_response: TokenResponse = response.json().await?;
 
-        let expires_at = token_response.expires_in.map(|expires_in| {
-            let expires_in = i64::try_from(expires_in).unwrap_or(i64::MAX);
-            chrono::Utc::now() + chrono::Duration::seconds(expires_in)
-        });
+        let expires_at = Self::token_expiration(Timestamp::now(), token_response.expires_in)?;
 
         let access_token = AccessToken {
             access_token: token_response.access_token,
@@ -314,7 +312,7 @@ impl AuthManager {
         self.get_access_token().await.is_some_and(|token| {
             token
                 .expires_at
-                .is_none_or(|expires_at| chrono::Utc::now() < expires_at)
+                .is_none_or(|expires_at| Timestamp::now() < expires_at)
         })
     }
 
@@ -356,10 +354,7 @@ impl AuthManager {
 
         let token_response: TokenResponse = response.json().await?;
 
-        let expires_at = token_response.expires_in.map(|expires_in| {
-            let expires_in = i64::try_from(expires_in).unwrap_or(i64::MAX);
-            chrono::Utc::now() + chrono::Duration::seconds(expires_in)
-        });
+        let expires_at = Self::token_expiration(Timestamp::now(), token_response.expires_in)?;
 
         let access_token = AccessToken {
             access_token: token_response.access_token,
@@ -377,6 +372,18 @@ impl AuthManager {
 
         info!("Successfully refreshed access token");
         Ok(access_token)
+    }
+
+    fn token_expiration(now: Timestamp, expires_in: Option<u64>) -> Result<Option<Timestamp>> {
+        expires_in
+            .map(|seconds| {
+                let invalid_lifetime =
+                    || AtlassianError::auth("OAuth token lifetime is out of range");
+                let seconds = i64::try_from(seconds).map_err(|_| invalid_lifetime())?;
+                now.checked_add(SignedDuration::from_secs(seconds))
+                    .map_err(|_| invalid_lifetime())
+            })
+            .transpose()
     }
 
     /// Generate PKCE code verifier
@@ -692,11 +699,11 @@ mod tests {
         // direction is what a token endpoint response and a stored token need,
         // and it is asserted here; the write direction no longer compiles, which
         // `SecretString`'s own `compile_fail` doctest pins.
-        let expires_at = chrono::Utc::now() + chrono::Duration::hours(1);
+        let expires_at: Timestamp = "2026-11-21T06:00:00.123Z".parse().unwrap();
         let deserialized: AccessToken = serde_json::from_value(serde_json::json!({
             "access_token": "test-token",
             "token_type": "Bearer",
-            "expires_at": expires_at,
+            "expires_at": "2026-11-21T07:00:00.123+01:00",
             "refresh_token": "refresh-token",
             "scope": "read:jira-work",
         }))
@@ -710,6 +717,19 @@ mod tests {
         );
         assert_eq!(deserialized.scope.as_deref(), Some("read:jira-work"));
         assert_eq!(deserialized.expires_at, Some(expires_at));
+    }
+
+    #[test]
+    fn token_lifetimes_must_fit_the_timestamp_range() {
+        let now = "2026-11-21T06:00:00Z".parse().unwrap();
+        let expected = "2026-11-21T06:01:00Z".parse().unwrap();
+        assert!(AuthManager::token_expiration(now, None).unwrap().is_none());
+        assert_eq!(
+            AuthManager::token_expiration(now, Some(60)).unwrap(),
+            Some(expected)
+        );
+        assert!(AuthManager::token_expiration(now, Some(i64::MAX.unsigned_abs())).is_err());
+        assert!(AuthManager::token_expiration(now, Some(u64::MAX)).is_err());
     }
 
     #[test]
