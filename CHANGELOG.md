@@ -9,10 +9,14 @@ the notes of its GitHub Release.
 
 ## [Unreleased]
 
+## [0.6.0]
+
 ### Changed
 
 - The legacy OAuth SDK's `AccessToken::expires_at` now uses `jiff::Timestamp` after replacing the unmaintained
   Chrono crate. Existing RFC 3339 token timestamps still deserialize, including timestamps with UTC offsets.
+  Rust callers constructing an `AccessToken` can parse the same RFC 3339 text into a `jiff::Timestamp`.
+  An OAuth response with an unrepresentable token lifetime now returns an authentication error.
 
 ### Fixed
 

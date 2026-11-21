@@ -86,6 +86,33 @@ pub struct TokenResponse {
     pub scope: Option<String>,
 }
 
+impl TokenResponse {
+    fn into_access_token(
+        self,
+        now: Timestamp,
+        previous_refresh_token: Option<SecretString>,
+    ) -> Result<AccessToken> {
+        let expires_at = self
+            .expires_in
+            .map(|seconds| {
+                let invalid_lifetime =
+                    || AtlassianError::auth("OAuth token lifetime is out of range");
+                let seconds = i64::try_from(seconds).map_err(|_| invalid_lifetime())?;
+                now.checked_add(SignedDuration::from_secs(seconds))
+                    .map_err(|_| invalid_lifetime())
+            })
+            .transpose()?;
+
+        Ok(AccessToken {
+            access_token: self.access_token,
+            token_type: self.token_type,
+            expires_at,
+            refresh_token: self.refresh_token.or(previous_refresh_token),
+            scope: self.scope,
+        })
+    }
+}
+
 /// Authorization manager for OAuth 2.1 flow
 #[derive(Debug)]
 pub struct AuthManager {
@@ -281,15 +308,7 @@ impl AuthManager {
 
         let token_response: TokenResponse = response.json().await?;
 
-        let expires_at = Self::token_expiration(Timestamp::now(), token_response.expires_in)?;
-
-        let access_token = AccessToken {
-            access_token: token_response.access_token,
-            token_type: token_response.token_type,
-            expires_at,
-            refresh_token: token_response.refresh_token,
-            scope: token_response.scope,
-        };
+        let access_token = token_response.into_access_token(Timestamp::now(), None)?;
 
         // Store the token
         {
@@ -354,15 +373,8 @@ impl AuthManager {
 
         let token_response: TokenResponse = response.json().await?;
 
-        let expires_at = Self::token_expiration(Timestamp::now(), token_response.expires_in)?;
-
-        let access_token = AccessToken {
-            access_token: token_response.access_token,
-            token_type: token_response.token_type,
-            expires_at,
-            refresh_token: token_response.refresh_token.or(Some(refresh_token)),
-            scope: token_response.scope,
-        };
+        let access_token =
+            token_response.into_access_token(Timestamp::now(), Some(refresh_token))?;
 
         // Update stored token
         {
@@ -372,18 +384,6 @@ impl AuthManager {
 
         info!("Successfully refreshed access token");
         Ok(access_token)
-    }
-
-    fn token_expiration(now: Timestamp, expires_in: Option<u64>) -> Result<Option<Timestamp>> {
-        expires_in
-            .map(|seconds| {
-                let invalid_lifetime =
-                    || AtlassianError::auth("OAuth token lifetime is out of range");
-                let seconds = i64::try_from(seconds).map_err(|_| invalid_lifetime())?;
-                now.checked_add(SignedDuration::from_secs(seconds))
-                    .map_err(|_| invalid_lifetime())
-            })
-            .transpose()
     }
 
     /// Generate PKCE code verifier
@@ -723,13 +723,71 @@ mod tests {
     fn token_lifetimes_must_fit_the_timestamp_range() {
         let now = "2026-11-21T06:00:00Z".parse().unwrap();
         let expected = "2026-11-21T06:01:00Z".parse().unwrap();
-        assert!(AuthManager::token_expiration(now, None).unwrap().is_none());
+        let response = |expires_in| TokenResponse {
+            access_token: SecretString::new("test-token"),
+            token_type: "Bearer".to_owned(),
+            expires_in,
+            refresh_token: None,
+            scope: Some("read:jira-work".to_owned()),
+        };
+        let no_expiration = response(None).into_access_token(now, None).unwrap();
+        assert_eq!(no_expiration.expires_at, None);
+        assert!(no_expiration.refresh_token.is_none());
+
+        let refreshed = response(Some(60))
+            .into_access_token(now, Some(SecretString::new("previous-refresh-token")))
+            .unwrap();
+        assert_eq!(refreshed.expires_at, Some(expected));
+        assert_eq!(refreshed.access_token.expose_secret(), "test-token");
+        assert_eq!(refreshed.token_type, "Bearer");
+        assert_eq!(refreshed.scope.as_deref(), Some("read:jira-work"));
         assert_eq!(
-            AuthManager::token_expiration(now, Some(60)).unwrap(),
-            Some(expected)
+            refreshed.refresh_token.as_ref().unwrap().expose_secret(),
+            "previous-refresh-token"
         );
-        assert!(AuthManager::token_expiration(now, Some(i64::MAX.unsigned_abs())).is_err());
-        assert!(AuthManager::token_expiration(now, Some(u64::MAX)).is_err());
+
+        let rotated = TokenResponse {
+            refresh_token: Some(SecretString::new("rotated-refresh-token")),
+            ..response(Some(60))
+        }
+        .into_access_token(now, refreshed.refresh_token)
+        .unwrap();
+        assert_eq!(
+            rotated.refresh_token.unwrap().expose_secret(),
+            "rotated-refresh-token"
+        );
+        assert!(response(Some(i64::MAX.unsigned_abs()))
+            .into_access_token(now, None)
+            .is_err());
+        assert!(response(Some(u64::MAX))
+            .into_access_token(now, None)
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn token_validity_checks_the_expiration_instant() {
+        let manager = AuthManager::new(
+            AuthManager::create_atlassian_oauth_config(
+                "test-client-id".to_owned(),
+                "https://example.com/callback",
+            )
+            .unwrap(),
+        );
+        assert!(!manager.is_token_valid().await);
+        for (expires_at, valid) in [
+            (None, true),
+            (Some(Timestamp::MIN), false),
+            (Some(Timestamp::MAX), true),
+        ] {
+            *manager.token.write().await = Some(AccessToken {
+                access_token: SecretString::new("test-token"),
+                token_type: "Bearer".to_owned(),
+                expires_at,
+                refresh_token: None,
+                scope: None,
+            });
+            assert_eq!(manager.is_token_valid().await, valid);
+        }
     }
 
     #[test]
