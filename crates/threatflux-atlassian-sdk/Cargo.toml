@@ -28,12 +28,12 @@ encrypted-env = ["dep:fluxencrypt", "dep:dotenvy"]
 
 [dependencies]
 base64 = { workspace = true }
-chrono = { workspace = true }
 dotenvy = { workspace = true, optional = true }
-# fluxencrypt is the sole path by which rsa 0.9.x (RUSTSEC-2023-0071, no patched
-# version) enters this crate's graph, which is why it is behind a feature.
+# Keep FluxEncrypt and its RSA dependencies behind the encrypted-env feature.
 fluxencrypt = { workspace = true, optional = true }
+jiff = { workspace = true }
 rand = { workspace = true }
+regex = { workspace = true }
 reqwest = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

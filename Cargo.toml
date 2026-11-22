@@ -8,7 +8,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.5.6"
+version = "0.6.0"
 edition = "2021"
 rust-version = "1.97.1"
 license = "MIT"
@@ -18,29 +18,29 @@ homepage = "https://github.com/ThreatFlux/threatflux-atlassian"
 [workspace.dependencies]
 anyhow = "1.0.104"
 base64 = "0.23.1"
-chrono = { version = "0.4.45", features = ["serde"] }
-clap = { version = "4.6.7", features = ["derive", "env"] }
+clap = { version = "4.6.9", features = ["derive", "env"] }
 # `default-features = false` has to live here, not on the member entries. When a
 # member writes `threatflux-atlassian-sdk = { workspace = true, default-features
 # = false }` and this table does not spell `default-features` out, cargo drops
 # the member's value with only a warning and builds the default feature set
 # anyway. Members that want `full` -- and with it `encrypted-env`, which pulls in
 # fluxencrypt and rsa -- opt back in with an explicit `features` list.
-threatflux-atlassian-sdk = { path = "crates/threatflux-atlassian-sdk", version = "0.5.6", default-features = false }
+threatflux-atlassian-sdk = { path = "crates/threatflux-atlassian-sdk", version = "0.6.0", default-features = false }
 # threatflux-atlassian-testkit is deliberately absent from this table. It is a
 # dev-only member that each consumer declares as a bare path dev-dependency with
 # no `version` field, so `cargo publish` strips the entry; inheriting it from
 # here would also make `cargo deny` unable to resolve the versionless entry.
 dotenvy = "0.15.7"
-fluxencrypt = "0.8.1"
+fluxencrypt = "0.8.3"
 # Hex encoding for the dedupe label digests. The Action's legacy label ladder
 # has to reproduce an existing on-Jira label byte for byte, so the encoding is a
 # wire format rather than a formatting detail; a shared, lowercase-only encoder
 # is one fewer place for a `{:02X}` to silently move a label.
 hex = "0.4.3"
-rand = "0.10.3"
+jiff = { version = "1.0.1", default-features = false, features = ["std"] }
+rand = "0.10.4"
 reqwest = { version = "0.13.5", default-features = false, features = ["form", "json", "multipart", "query", "rustls"] }
-regex = "1.13.1"
+regex = "1.13.2"
 schemars = "1.2.3"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
@@ -59,10 +59,10 @@ tokio = { version = "1.54.1", features = ["fs", "macros", "rt-multi-thread", "sy
 tokio-test = "0.4.6"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["fmt", "env-filter"] }
-url = { version = "2.5.8", features = ["serde"] }
-uuid = { version = "1.29.2", features = ["serde", "v4"] }
+url = { version = "2.5.9", features = ["serde"] }
+uuid = { version = "1.29.3", features = ["serde", "v4"] }
 wiremock = "0.6.5"
-zeroize = { version = "1.9.1", features = ["derive"] }
+zeroize = { version = "1.9.2", features = ["derive"] }
 
 # Clippy levels live here, not in crate-root `#![allow(...)]` attributes: a
 # source-level allow outranks the `-D` flags CI passes on the command line, so a
