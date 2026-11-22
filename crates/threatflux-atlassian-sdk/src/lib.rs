@@ -90,6 +90,7 @@ pub use client::AtlassianClient;
 pub use config::{AtlassianConfig, AtlassianConfigBuilder, HostPolicy};
 pub use error::{AtlassianError, DiagnosticsPolicy, ResponseDiagnostics, Result};
 pub use jql::{JqlBuilder, JqlError, JqlOrder};
+pub use oauth_timestamp::{OAuthTimestamp, ParseOAuthTimestampError};
 pub use remote_client::AtlassianRemoteClient;
 // Named rather than globbed: `types::*` below already claims the unqualified
 // namespace, and a glob here would make any future name collision between the
@@ -108,6 +109,7 @@ pub mod client;
 pub mod config;
 pub mod error;
 pub mod jql;
+mod oauth_timestamp;
 pub mod remote_client;
 pub mod search;
 pub mod secret;

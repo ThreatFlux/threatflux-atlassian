@@ -2182,6 +2182,7 @@ dependencies = [
  "fluxencrypt",
  "jiff",
  "rand",
+ "regex",
  "reqwest",
  "schemars",
  "serde",

@@ -33,6 +33,7 @@ dotenvy = { workspace = true, optional = true }
 fluxencrypt = { workspace = true, optional = true }
 jiff = { workspace = true }
 rand = { workspace = true }
+regex = { workspace = true }
 reqwest = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
