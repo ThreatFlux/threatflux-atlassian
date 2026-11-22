@@ -218,6 +218,12 @@ workflow-settable inputs.
 
 ## Breaking Changes
 
+- **SDK 0.6.0 moves `AccessToken::expires_at` to `Option<OAuthTimestamp>`.** Parse existing timestamp text
+  with `text.parse::<threatflux_atlassian_sdk::OAuthTimestamp>()`. To migrate a Chrono value in
+  Rust, pass its `timestamp()` and `timestamp_subsec_nanos()` to `OAuthTimestamp::from_unix_parts`.
+  The constructor returns an `Option` and `to_unix_parts()` retrieves the same components.
+  Existing token JSON continues to accept offsets, nanoseconds, leap seconds, and signed years
+  from -262143 through +262142.
 - **`JIRA_CERT_PATH` is no longer read.** It reached `add_root_certificate`, which let an environment install a trust
   anchor for whatever host the same environment chose with `JIRA_URL` — certificate verification relaxed from the
   environment, which is precisely what this crate now guarantees cannot happen. Setting the variable is ignored rather

@@ -9,6 +9,15 @@ the notes of its GitHub Release.
 
 ## [Unreleased]
 
+### Changed
+
+- Removed Chrono from the workspace dependency graph. In SDK 0.6.0,
+  `AccessToken::expires_at` uses `Option<OAuthTimestamp>`. Parse the same timestamp strings
+  with `text.parse::<OAuthTimestamp>()` or convert an existing UTC value with
+  `OAuthTimestamp::from_unix_parts(old.timestamp(), old.timestamp_subsec_nanos())`.
+  Existing token JSON retains its offset handling, extended year range, nanosecond precision and
+  leap seconds. OAuth lifetimes outside the supported range return an authentication error.
+
 ### Fixed
 
 - `release.yml` writes the Windows archive's `.sha256` file with an LF line ending, like the Unix archives' files.

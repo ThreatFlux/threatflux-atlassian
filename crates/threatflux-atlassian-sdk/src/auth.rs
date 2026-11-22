@@ -8,6 +8,7 @@
 use crate::error::{
     map_error_response, AtlassianError, DiagnosticsPolicy, FailureContext, FailureShape, Result,
 };
+pub use crate::oauth_timestamp::{OAuthTimestamp, ParseOAuthTimestampError};
 use crate::secret::{zeroize_string, SecretString};
 use base64::Engine;
 use reqwest::header::HeaderValue;
@@ -53,8 +54,11 @@ pub struct AccessToken {
     pub access_token: SecretString,
     /// Token type (usually "Bearer")
     pub token_type: String,
-    /// Token expiration timestamp
-    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// UTC token expiration timestamp, deserialized from an RFC 3339 string.
+    ///
+    /// Since SDK 0.6.0, use `OAuthTimestamp::from_unix_parts` to convert a
+    /// previous Chrono value's Unix seconds and fractional nanoseconds.
+    pub expires_at: Option<OAuthTimestamp>,
     /// Refresh token for renewals
     pub refresh_token: Option<SecretString>,
     /// Granted scopes
@@ -83,6 +87,33 @@ pub struct TokenResponse {
     pub refresh_token: Option<SecretString>,
     /// Granted scope
     pub scope: Option<String>,
+}
+
+impl TokenResponse {
+    fn into_access_token(
+        self,
+        now: OAuthTimestamp,
+        previous_refresh_token: Option<SecretString>,
+    ) -> Result<AccessToken> {
+        let expires_at = self
+            .expires_in
+            .map(|seconds| {
+                let invalid_lifetime =
+                    || AtlassianError::auth("OAuth token lifetime is out of range");
+                let seconds = i64::try_from(seconds).map_err(|_| invalid_lifetime())?;
+                now.checked_add_seconds(seconds)
+                    .ok_or_else(invalid_lifetime)
+            })
+            .transpose()?;
+
+        Ok(AccessToken {
+            access_token: self.access_token,
+            token_type: self.token_type,
+            expires_at,
+            refresh_token: self.refresh_token.or(previous_refresh_token),
+            scope: self.scope,
+        })
+    }
 }
 
 /// Authorization manager for OAuth 2.1 flow
@@ -280,18 +311,7 @@ impl AuthManager {
 
         let token_response: TokenResponse = response.json().await?;
 
-        let expires_at = token_response.expires_in.map(|expires_in| {
-            let expires_in = i64::try_from(expires_in).unwrap_or(i64::MAX);
-            chrono::Utc::now() + chrono::Duration::seconds(expires_in)
-        });
-
-        let access_token = AccessToken {
-            access_token: token_response.access_token,
-            token_type: token_response.token_type,
-            expires_at,
-            refresh_token: token_response.refresh_token,
-            scope: token_response.scope,
-        };
+        let access_token = token_response.into_access_token(OAuthTimestamp::now(), None)?;
 
         // Store the token
         {
@@ -314,7 +334,7 @@ impl AuthManager {
         self.get_access_token().await.is_some_and(|token| {
             token
                 .expires_at
-                .is_none_or(|expires_at| chrono::Utc::now() < expires_at)
+                .is_none_or(|expires_at| OAuthTimestamp::now() < expires_at)
         })
     }
 
@@ -356,18 +376,8 @@ impl AuthManager {
 
         let token_response: TokenResponse = response.json().await?;
 
-        let expires_at = token_response.expires_in.map(|expires_in| {
-            let expires_in = i64::try_from(expires_in).unwrap_or(i64::MAX);
-            chrono::Utc::now() + chrono::Duration::seconds(expires_in)
-        });
-
-        let access_token = AccessToken {
-            access_token: token_response.access_token,
-            token_type: token_response.token_type,
-            expires_at,
-            refresh_token: token_response.refresh_token.or(Some(refresh_token)),
-            scope: token_response.scope,
-        };
+        let access_token =
+            token_response.into_access_token(OAuthTimestamp::now(), Some(refresh_token))?;
 
         // Update stored token
         {
@@ -692,11 +702,11 @@ mod tests {
         // direction is what a token endpoint response and a stored token need,
         // and it is asserted here; the write direction no longer compiles, which
         // `SecretString`'s own `compile_fail` doctest pins.
-        let expires_at = chrono::Utc::now() + chrono::Duration::hours(1);
+        let expires_at: OAuthTimestamp = "2026-11-21T06:00:00.123Z".parse().unwrap();
         let deserialized: AccessToken = serde_json::from_value(serde_json::json!({
             "access_token": "test-token",
             "token_type": "Bearer",
-            "expires_at": expires_at,
+            "expires_at": "2026-11-21T07:00:00.123+01:00",
             "refresh_token": "refresh-token",
             "scope": "read:jira-work",
         }))
@@ -710,6 +720,126 @@ mod tests {
         );
         assert_eq!(deserialized.scope.as_deref(), Some("read:jira-work"));
         assert_eq!(deserialized.expires_at, Some(expires_at));
+    }
+
+    #[test]
+    fn access_token_accepts_legacy_timestamp_range_and_precision() {
+        for (wire, expected) in [
+            (
+                "-262143-01-01T00:00:00Z",
+                OAuthTimestamp::MIN.to_unix_parts(),
+            ),
+            (
+                "+262142-12-31T23:59:60.999999999Z",
+                OAuthTimestamp::MAX.to_unix_parts(),
+            ),
+            (" 1970-1-1 0: 59:59.123456789987 +0100 ", (-1, 123_456_789)),
+            ("1970-01-01t00:59:60.123456789+01:00", (-1, 1_123_456_789)),
+            ("1969-12-31T23:59:60.123456789 UTC", (-1, 1_123_456_789)),
+            (
+                "+262142-12-31T23:59:59.999999999Z",
+                (8_210_266_876_799, 999_999_999),
+            ),
+            ("-262143-01-01T00:01:00+00:01", (-8_321_978_448_000, 0)),
+        ] {
+            let token: AccessToken = serde_json::from_value(serde_json::json!({
+                "access_token": "test-token",
+                "token_type": "Bearer",
+                "expires_at": wire,
+            }))
+            .unwrap();
+            assert_eq!(
+                token.expires_at.unwrap().to_unix_parts(),
+                expected,
+                "{wire}"
+            );
+        }
+        for invalid in [
+            "-262143-01-01T00:00:00+00:01",
+            "+262142-12-31T23:59:59-00:01",
+            "+262143-01-01T00:00:00Z",
+            "2025-02-29T00:00:00Z",
+            "2024-01-01T00:00:00+24:00",
+        ] {
+            assert!(invalid.parse::<OAuthTimestamp>().is_err(), "{invalid}");
+        }
+        assert!(
+            "1969-12-31T23:59:60.999999999Z"
+                .parse::<OAuthTimestamp>()
+                .unwrap()
+                < "1970-01-01T00:00:00Z".parse::<OAuthTimestamp>().unwrap()
+        );
+    }
+
+    #[test]
+    fn token_lifetimes_must_fit_the_timestamp_range() {
+        let now = "2026-11-21T06:00:00.123456789Z".parse().unwrap();
+        let expected = "2026-11-21T06:01:00.123456789Z".parse().unwrap();
+        let response = |expires_in| TokenResponse {
+            access_token: SecretString::new("test-token"),
+            token_type: "Bearer".to_owned(),
+            expires_in,
+            refresh_token: None,
+            scope: Some("read:jira-work".to_owned()),
+        };
+        let no_expiration = response(None).into_access_token(now, None).unwrap();
+        assert_eq!(no_expiration.expires_at, None);
+        assert!(no_expiration.refresh_token.is_none());
+
+        let refreshed = response(Some(60))
+            .into_access_token(now, Some(SecretString::new("previous-refresh-token")))
+            .unwrap();
+        assert_eq!(refreshed.expires_at, Some(expected));
+        assert_eq!(refreshed.access_token.expose_secret(), "test-token");
+        assert_eq!(refreshed.token_type, "Bearer");
+        assert_eq!(refreshed.scope.as_deref(), Some("read:jira-work"));
+        assert_eq!(
+            refreshed.refresh_token.as_ref().unwrap().expose_secret(),
+            "previous-refresh-token"
+        );
+
+        let rotated = TokenResponse {
+            refresh_token: Some(SecretString::new("rotated-refresh-token")),
+            ..response(Some(60))
+        }
+        .into_access_token(now, refreshed.refresh_token)
+        .unwrap();
+        assert_eq!(
+            rotated.refresh_token.unwrap().expose_secret(),
+            "rotated-refresh-token"
+        );
+        assert!(response(Some(i64::MAX.unsigned_abs()))
+            .into_access_token(now, None)
+            .is_err());
+        assert!(response(Some(u64::MAX))
+            .into_access_token(now, None)
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn token_validity_checks_the_expiration_instant() {
+        let manager = AuthManager::new(
+            AuthManager::create_atlassian_oauth_config(
+                "test-client-id".to_owned(),
+                "https://example.com/callback",
+            )
+            .unwrap(),
+        );
+        assert!(!manager.is_token_valid().await);
+        for (expires_at, valid) in [
+            (None, true),
+            (Some(OAuthTimestamp::MIN), false),
+            (Some(OAuthTimestamp::MAX), true),
+        ] {
+            *manager.token.write().await = Some(AccessToken {
+                access_token: SecretString::new("test-token"),
+                token_type: "Bearer".to_owned(),
+                expires_at,
+                refresh_token: None,
+                scope: None,
+            });
+            assert_eq!(manager.is_token_valid().await, valid);
+        }
     }
 
     #[test]
