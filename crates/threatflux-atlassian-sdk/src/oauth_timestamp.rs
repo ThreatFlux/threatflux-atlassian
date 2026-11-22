@@ -38,7 +38,7 @@ pub struct ParseOAuthTimestampError;
 impl OAuthTimestamp {
     /// Earliest supported instant at the start of UTC year -262143.
     pub const MIN: Self = Self {
-        seconds: -8_321_978_448_000,
+        seconds: -8_334_601_228_800,
         nanoseconds: 0,
     };
 

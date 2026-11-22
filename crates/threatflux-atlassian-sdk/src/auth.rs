@@ -725,13 +725,10 @@ mod tests {
     #[test]
     fn access_token_accepts_legacy_timestamp_range_and_precision() {
         for (wire, expected) in [
-            (
-                "-262143-01-01T00:00:00Z",
-                OAuthTimestamp::MIN.to_unix_parts(),
-            ),
+            ("-262143-01-01T00:00:00Z", (-8_334_601_228_800, 0)),
             (
                 "+262142-12-31T23:59:60.999999999Z",
-                OAuthTimestamp::MAX.to_unix_parts(),
+                (8_210_266_876_799, 1_999_999_999),
             ),
             (" 1970-1-1 0: 59:59.123456789987 +0100 ", (-1, 123_456_789)),
             ("1970-01-01t00:59:60.123456789+01:00", (-1, 1_123_456_789)),
@@ -740,14 +737,14 @@ mod tests {
                 "+262142-12-31T23:59:59.999999999Z",
                 (8_210_266_876_799, 999_999_999),
             ),
-            ("-262143-01-01T00:01:00+00:01", (-8_321_978_448_000, 0)),
+            ("-262143-01-01T00:01:00+00:01", (-8_334_601_228_800, 0)),
         ] {
             let token: AccessToken = serde_json::from_value(serde_json::json!({
                 "access_token": "test-token",
                 "token_type": "Bearer",
                 "expires_at": wire,
             }))
-            .unwrap();
+            .unwrap_or_else(|err| panic!("failed to deserialize {wire}: {err}"));
             assert_eq!(
                 token.expires_at.unwrap().to_unix_parts(),
                 expected,
