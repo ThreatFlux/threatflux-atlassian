@@ -170,7 +170,7 @@ still applies, so a cleartext `JIRA_API_TOKEN` alongside a `*_ENCRYPTED` value w
 
 ```toml
 [dependencies]
-threatflux-atlassian-sdk = { version = "0.5", default-features = false, features = ["direct", "remote"] }
+threatflux-atlassian-sdk = { version = "0.6", default-features = false, features = ["direct", "remote"] }
 ```
 
 ## Errors, Retries, and Rate Limits
