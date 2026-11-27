@@ -2,7 +2,7 @@
 # These Rustls-only binaries need no shell or shared native runtime libraries.
 # Build checks require maintained system musl, static PIE and no dynamic loader.
 # CA data and its Debian package record travel together from the same stage.
-FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2 AS certificates
+FROM debian:trixie-slim@sha256:8aa5a7bf5a1955bddbe7d74fcdd0b91ab30e74362a8b73af672b0481b35b44a0 AS certificates
 # hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge 20250419+deb13u1 \

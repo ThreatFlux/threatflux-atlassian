@@ -98,9 +98,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.104"
+version = "1.0.105"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
+checksum = "2cb931c189b85683d69a5cfad41d4d418671e1ac413dd209f3f2fc31e3cfd902"
 
 [[package]]
 name = "assert-json-diff"
@@ -542,9 +542,9 @@ checksum = "1c66915cc5391097de7a2b0b972e8505aa33c0df401fd3a6811dbdb32881ba48"
 
 [[package]]
 name = "fluxencrypt"
-version = "0.8.3"
+version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce9fc20704a51541e94e1ac92d4ddd6633277a96bfda93c3259fe09177dc6f05"
+checksum = "70ffdc46062e8f5ee0920b9f31cf51fa3612426f5e1ee7e64a65696f9b029486"
 dependencies = [
  "anyhow",
  "aws-lc-rs",
